@@ -1,0 +1,13 @@
+# Code owners for client-rust-test (the wyrd M4 evaluation gate).
+# Requested for review automatically on any PR touching these paths.
+
+# Default owner for everything.
+*                       @eduralph
+
+# The vendored MetadataStore contract and its TiKV mapping — the load-bearing
+# surface the gate verifies. Changes here need a deliberate look.
+/src/                   @eduralph
+
+# The gate tests and findings are the harness's output; guard their integrity.
+/tests/                 @eduralph
+/findings/              @eduralph

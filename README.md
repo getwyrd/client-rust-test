@@ -175,6 +175,16 @@ applies `.read_only()` internally, client.rs:230. Retracted.)
 - Docker with the compose plugin (for the local cluster), or any reachable
   TiKV ≥ v5.0 cluster via `$PD_ADDRS` (comma separated)
 
+## Contributing
+
+`main` is protected: changes land via pull request (force-push and deletion
+are blocked, linear history required). Enable the version-controlled pre-push
+hook once per clone so `make check` runs before anything leaves your machine:
+
+```sh
+git config core.hooksPath .githooks   # runs make check on push; bypass with --no-verify
+```
+
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).
