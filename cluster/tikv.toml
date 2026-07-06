@@ -1,0 +1,21 @@
+# Aggressive region-split thresholds, copied from client-rust's CI config
+# (config/tikv.toml) so even the gate's small keyspaces split into many Raft
+# regions — making the multi-key atomic-commit tests genuinely cross-region.
+#
+# Deliberately NOT copied from that config: api-version/enable-ttl (the wyrd
+# M4 deployment is plain api-v1, no keyspace) and raft-entry-max-size (the
+# gate's 128KiB value corpus should not trip an artificially low cap).
+
+[coprocessor]
+region-max-keys = 10
+region-split-keys = 7
+batch-split-limit = 100
+
+[raftstore]
+region-split-check-diff = "1B"
+pd-heartbeat-tick-interval = "2s"
+pd-store-heartbeat-tick-interval = "5s"
+split-region-check-tick-interval = "1s"
+
+[storage]
+reserve-space = "0MiB"

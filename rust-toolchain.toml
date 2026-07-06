@@ -1,0 +1,4 @@
+# Match the crate under test: client-rust pins 1.93.0.
+[toolchain]
+channel = "1.93.0"
+components = ["rustfmt", "clippy"]

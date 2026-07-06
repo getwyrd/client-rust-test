@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../client-rust"
+		},
+		{
+			"path": "../client-go"
+		}
+	],
+	"settings": {}
+}

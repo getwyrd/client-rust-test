@@ -1,0 +1,43 @@
+# Throwaway single-node TiKV + PD for the evaluation gate — the shape of
+# proposal 0015 slice 1 ("a throwaway single-node TiKV in deploy/ for CI").
+#
+# - v8.5.5 matches client-rust's own CI pin (its .github/workflows/ci.yml).
+# - Host networking keeps PD's advertised addresses reachable from the host
+#   without the classic bridged-advertise dance (Linux only, like this rig).
+# - tikv.toml copies client-rust CI's aggressive region-split thresholds so
+#   multi-key transactions genuinely span Raft regions — the property M4
+#   depends on ("transactions span multiple keys across multiple regions").
+#
+#   docker compose -f cluster/docker-compose.yml up -d   # or: make cluster-up
+name: client-rust-test-cluster
+services:
+  pd:
+    image: pingcap/pd:v8.5.5
+    network_mode: host
+    command:
+      - --name=pd
+      - --data-dir=/data/pd
+      - --client-urls=http://127.0.0.1:2379
+      - --peer-urls=http://127.0.0.1:2380
+      - --config=/pd.toml
+    volumes:
+      - pd-data:/data
+      - ./pd.toml:/pd.toml:ro
+
+  tikv:
+    image: pingcap/tikv:v8.5.5
+    network_mode: host
+    command:
+      - --pd-endpoints=127.0.0.1:2379
+      - --addr=127.0.0.1:20160
+      - --data-dir=/data/tikv
+      - --config=/tikv.toml
+    volumes:
+      - tikv-data:/data
+      - ./tikv.toml:/tikv.toml:ro
+    depends_on:
+      - pd
+
+volumes:
+  pd-data: {}
+  tikv-data: {}

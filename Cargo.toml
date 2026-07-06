@@ -1,0 +1,41 @@
+[package]
+name = "client-rust-test"
+version = "0.1.0"
+edition = "2021"
+# Matches the crate under test (client-rust pins 1.93).
+rust-version = "1.93"
+license = "Apache-2.0"
+publish = false
+description = "Wyrd M4 evaluation gate: the MetadataStore contract prototyped over tikv-client (tikv/client-rust), driven against a real TiKV/PD cluster."
+
+[features]
+# Gate the cluster-backed tests exactly like client-rust does: they need a
+# reachable TiKV/PD (see cluster/ and $PD_ADDRS) and are skipped by default.
+integration-tests = []
+
+[dependencies]
+# The crate under test — the sibling checkout, so local work on client-rust
+# is what the gate exercises. Deliberately the ONLY path dependency: the
+# wyrd MetadataStore contract is vendored into src/traits.rs, not depended
+# on, so this harness stays standalone.
+tikv-client = { path = "../client-rust" }
+
+async-trait = "0.1"
+bytes = "1"
+log = "0.4"
+
+[dev-dependencies]
+env_logger = "0.10"
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+# For the failpoint proof (tests/failpoint_gate.rs). Enabling `fail/failpoints`
+# here activates the `after-prewrite` failpoint compiled into tikv-client (via
+# Cargo feature unification), letting the test make a commit fail *after*
+# prewrite has placed its locks. Only affects the test build, not the library.
+fail = { version = "0.4", features = ["failpoints"] }
+
+# The failpoint proof is its own binary: the `fail` registry is process-global,
+# so it must not share a process with the parallel commits in `gate`.
+[[test]]
+name = "failpoint_gate"
+path = "tests/failpoint_gate.rs"

@@ -1,0 +1,25 @@
+# Issue #267 (Logging) — RUST_LOG=tikv_client=debug demonstration
+# Against a live TiKV/PD cluster (an optimistic commit, then a rollback).
+# Shows: start_ts on every lifecycle event, the new commit-success log
+# (commit_ts + elapsed), region/store ids on retries, and Drop-with-status.
+
+began optimistic transaction, start_ts: 467480286297063425
+committing transaction, start_ts: 467480286297063425
+starting auto-heartbeat, start_ts: 467480286297063425, interval: 10s
+committing (2pc), start_ts: 467480286297063425
+prewriting, start_ts: 467480286297063425, mutations: 1
+single_shard_handler, region: RegionVerId { id: 4, conf_ver: 1, ver: 162 }, store: Some(1)
+committing primary, start_ts: 467480286297063425
+transaction committed, start_ts: 467480286297063425, commit_ts: Some(467480286297063427), elapsed: 12.412026ms
+committing secondary keys, start_ts: 467480286297063425, mutations: 1
+began optimistic transaction, start_ts: 467480286297063428
+rolling back transaction, start_ts: 467480286297063428
+rolling back (2pc), start_ts: 467480286297063428
+transaction rolled back, start_ts: 467480286297063428
+dropping transaction, start_ts: 467480286297063428, status: Rolledback
+dropping transaction, start_ts: 467480286297063425, status: Committed
+
+# Verification gates (worktree off master e53837d):
+#   cargo fmt -- --check              : clean
+#   cargo clippy -D clippy::all       : clean (RUSTFLAGS=-Dwarnings)
+#   cargo test --lib --no-default-features : 64 passed (incl. new commit_logs_start_ts)

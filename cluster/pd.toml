@@ -1,0 +1,10 @@
+# Single-node cluster: one replica per region (there is only one store), and
+# merge thresholds low enough (from client-rust CI's pd.toml) that the split
+# regions the tikv.toml thresholds create do not immediately merge back.
+
+[replication]
+max-replicas = 1
+
+[schedule]
+max-merge-region-size = 1
+max-merge-region-keys = 3
