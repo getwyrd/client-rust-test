@@ -93,24 +93,44 @@ async fn pd_get(path: &str) -> Value {
         .build()
         .expect("build PD http client");
 
+    // An endpoint counts as usable only if it answers 2xx with parseable JSON.
+    // Falling through on transport errors alone is not enough: a PD that is up but
+    // unhealthy — mid-restart, not yet the leader — answers with a non-2xx or an
+    // HTML error page, and treating that as fatal would fail the precondition on a
+    // cluster the client under test can happily reach via a later address. Every
+    // way an endpoint can be useless has to lead to the next one.
     let addrs = pd_addrs();
     let mut errors = Vec::new();
     for addr in &addrs {
         let url = format!("http://{addr}{path}");
-        match client.get(&url).send().await {
-            Ok(resp) => {
-                let body = resp.text().await.expect("PD response body");
-                return serde_json::from_str(&body)
-                    .unwrap_or_else(|e| panic!("PD {url} returned non-JSON: {e} / {body}"));
-            }
+        match try_pd(&client, &url).await {
+            Ok(v) => return v,
             Err(e) => errors.push(format!("  {url}: {e}")),
         }
     }
     panic!(
-        "no PD endpoint answered {path} within {PD_TIMEOUT:?} — is the cluster up? \
-         (`make cluster-up`)\n{}",
+        "no PD endpoint answered {path} with usable JSON (timeout {PD_TIMEOUT:?}) — is the \
+         cluster up? (`make cluster-up`)\n{}",
         errors.join("\n")
     );
+}
+
+async fn try_pd(client: &reqwest::Client, url: &str) -> Result<Value, String> {
+    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let body = resp.text().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!(
+            "HTTP {status}: {}",
+            body.chars().take(120).collect::<String>()
+        ));
+    }
+    serde_json::from_str(&body).map_err(|e| {
+        format!(
+            "non-JSON body ({e}): {}",
+            body.chars().take(120).collect::<String>()
+        )
+    })
 }
 
 fn hex_to_bytes(s: &str) -> Vec<u8> {
