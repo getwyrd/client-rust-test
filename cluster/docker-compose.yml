@@ -32,6 +32,17 @@ services:
   tikv:
     image: ${TIKV_IMAGE:?unset — run via `make cluster-up`, which generates cluster/images.env from pins.toml}
     network_mode: host
+    # TiKV refuses to start unless it can open ~123880 file descriptors:
+    #   [FATAL] the maximum number of open file descriptors is too small,
+    #           got 65536, expect greater or equal to 123880
+    # Whether it gets them depends on the Docker daemon's default ulimit, which
+    # differs between machines — a workstation daemon often grants enough while a
+    # GitHub runner caps containers at 65536, so the cluster came up locally and
+    # died instantly in CI. Set it explicitly so every environment is the same.
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     command:
       - --pd-endpoints=127.0.0.1:2379
       - --addr=127.0.0.1:20160
