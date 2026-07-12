@@ -7,7 +7,11 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  # Keyed on the PR number, not the branch name. `github.head_ref` is just the
+  # source branch, so two PRs from different forks that both use, say, `patch-1`
+  # would share a group — and the newer one would cancel the older one's CI, which
+  # reads as a flaky failure on a PR nobody touched.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:

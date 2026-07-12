@@ -87,10 +87,15 @@ cluster-up: cluster/images.env
 cluster/images.env: pins.toml scripts/cluster-env.sh
 	./scripts/cluster-env.sh > $@
 
-cluster-down:
+# These depend on images.env too. Every compose invocation passes
+# `--env-file cluster/images.env`, and the file is generated + gitignored — so on a
+# fresh checkout, or right after `make clean` removed it, compose would fail before
+# it could tear anything down. Leaving a running cluster with no way to stop it is
+# a poor trap to set. The dep regenerates it; it is cheap and idempotent.
+cluster-down: cluster/images.env
 	$(COMPOSE) down -v
 
-cluster-logs:
+cluster-logs: cluster/images.env
 	$(COMPOSE) logs --tail 100
 
 clean:
