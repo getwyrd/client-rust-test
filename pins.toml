@@ -1,0 +1,64 @@
+# The single source of truth for everything this harness tests against.
+#
+# Nothing else in the repo may name a revision, a module version, or an image
+# tag. `make pins-check` (scripts/check-pins.sh) asserts that every consumer —
+# cluster/images.env, rust-toolchain.toml, go/go.mod — agrees with this file.
+#
+# Why a file and not Cargo.lock: the crate under test is a PATH dependency
+# (`tikv-client = { path = "../client-rust" }`), and Cargo records no source or
+# rev for a path dep. The lockfile therefore pins NOTHING. This file plus the
+# provenance stamp (scripts/provenance.sh) is what closes that hole.
+
+schema = "parity-pins/v1"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The SUBJECT under test.
+#
+# THE BASELINE IS UPSTREAM. Every gap this harness reports is stated against
+# tikv/client-rust, and every fix must land there. The fork is only where PR
+# branches live before they merge; `rev` must always be an ancestor of
+# upstream/master, which check-pins.sh enforces with `merge-base --is-ancestor`.
+# That check is what stops the harness certifying a verdict against fork-only
+# work that can never be upstreamed.
+[client_rust]
+upstream = "https://github.com/tikv/client-rust.git"
+fork     = "https://github.com/getwyrd/client-rust.git"
+
+# master @ "chore - Bump MSRV/toolchain to stable 1.93 (#530)".
+# Verified an ancestor of upstream/master (currently 1e8a488, PR #548 merged).
+# This is the rev the README's gate verdict is stated against — 16 green + d6
+# red — so CI reproduces a claim we can already check. Bump it only as a
+# deliberate, reviewed step: a bump re-states every ledger claim.
+rev = "e53837dc6d94f8de4be090571dca0198dc993b9d"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The ORACLE.
+#
+# Deliberately NOT a sibling path/replace: an oracle you can accidentally edit
+# is not an oracle. A pseudo-version `require` is content-addressed via go.sum,
+# so it is deterministic by construction and verified on every build.
+# The escape hatch for hacking on client-go is a gitignored go.work; CI sets
+# GOWORK=off so it can never leak into a result.
+[client_go]
+module = "github.com/tikv/client-go/v2"
+# Canonical pseudo-version resolved by `go list -m`, not hand-derived.
+version = "v2.0.8-0.20260708122311-01bd8f99f4da"
+rev     = "01bd8f99f4da23c6fc9d671eecc0166c7b6ceb9b"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The cluster.
+#
+# Digest-pinned, not tag-pinned: `pingcap/pd:v8.5.5` is a mutable tag and can be
+# re-pushed. A verdict signed against a floating tag is not reproducible six
+# months from now. Tag AND digest together (repo:tag@sha256:...) keeps the
+# version human-readable while making the bits immutable.
+# v8.5.5 matches client-rust's own CI pin.
+[cluster]
+tikv_version = "v8.5.5"
+pd_image     = "pingcap/pd:v8.5.5@sha256:a043b91dc9a0ad8d1c2a2aa8b84ea3f28c2399f9245683cc83d1603b5ee1df9c"
+tikv_image   = "pingcap/tikv:v8.5.5@sha256:1600c2de7432af1f7f23291dcac13b3f82950d4ef722b1f01c3e7b129af64b64"
+
+# ─────────────────────────────────────────────────────────────────────────────
+[toolchain]
+rust = "1.93.0"    # must equal rust-toolchain.toml, and upstream client-rust's MSRV
+go   = "1.25.10"   # must be >= client-go's own `go` directive

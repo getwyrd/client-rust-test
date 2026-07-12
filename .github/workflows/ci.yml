@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_LOG: info
+  PD_ADDRS: 127.0.0.1:2379
+  # Every CI run must be admissible as evidence: refuse to run at all if the
+  # crate under test is not at the revision pins.toml names.
+  PARITY_STRICT: "1"
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Read the pins once. Every other job consumes these outputs, so a revision
+  # appears in exactly one place in the whole repo.
+  pins:
+    runs-on: ubuntu-latest
+    outputs:
+      client_rust_rev: ${{ steps.p.outputs.client_rust_rev }}
+      rust_toolchain:  ${{ steps.p.outputs.rust_toolchain }}
+    steps:
+      - uses: actions/checkout@v4
+      # ubuntu-latest ships Python >= 3.11, so tomllib is stdlib. Nothing to install.
+      - id: p
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib, pathlib
+          p = tomllib.loads(pathlib.Path("pins.toml").read_text())
+          print(f"client_rust_rev={p['client_rust']['rev']}")
+          print(f"rust_toolchain={p['toolchain']['rust']}")
+          PY
+
+  # ───────────────────────────────────────────────────────────────────────────
+  check:
+    needs: pins
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: client-rust-test } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: client-rust-test }
+
+      # Recreate the sibling layout the path dependency expects, at the PINNED
+      # revision. This is what makes `tikv-client = { path = "../client-rust" }`
+      # deterministic in CI without rewriting the manifest — so a developer's
+      # local sibling checkout keeps working untouched.
+      #
+      # Cloned from UPSTREAM, not the fork: the baseline for every gap this
+      # harness reports is tikv/client-rust. check-pins.sh separately asserts the
+      # pin is an ancestor of upstream/master.
+      - uses: actions/checkout@v4
+        with:
+          repository: tikv/client-rust
+          ref: ${{ needs.pins.outputs.client_rust_rev }}
+          path: client-rust
+
+      # No protoc step: client-rust has no build.rs and its `proto-build` member
+      # is not in our dependency graph. (Its own CI needs protoc; we do not.)
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: client-rust-test }
+
+      # rust-toolchain.toml pins the channel; check-pins.sh asserts it matches.
+      - run: make check
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # The cluster-backed gate.
+  #
+  # MUST run directly on the VM. cluster/docker-compose.yml uses
+  # `network_mode: host`, which shares the runner's network namespace — so PD's
+  # advertised 127.0.0.1:2379 is reachable from the test process. Adding a
+  # `container:` to this job, or using GitHub `services:` (bridged, random
+  # ports), silently breaks that. Linux runners only.
+  gate:
+    needs: [pins, check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults: { run: { working-directory: client-rust-test } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: client-rust-test }
+      - uses: actions/checkout@v4
+        with:
+          repository: tikv/client-rust
+          ref: ${{ needs.pins.outputs.client_rust_rev }}
+          path: client-rust
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: client-rust-test }
+
+      # Digest-pinned images from pins.toml + wait for PD and a TiKV store Up.
+      - name: cluster up
+        run: make cluster-up
+
+      # Records the revision actually under test; aborts here (PARITY_STRICT=1)
+      # if it is not the pin.
+      - name: provenance
+        run: make provenance
+
+      - name: unit tests
+        run: make unit-test
+
+      # Both suites, checked against the EXPECTED verdict: green except d6 and d7,
+      # which must be red (#519 -> PR 544, #545 -> PR 547 — both still open).
+      # An unexpected PASS fails this job on purpose: it means the gap closed
+      # upstream and the pin is stale. This also covers the failpoint suite, which
+      # `make gate` used to skip entirely.
+      - name: verdict (expect green + d6/d7 XFAIL)
+        run: make verdict
+
+      - name: cluster logs
+        if: failure()
+        run: make cluster-logs
+
+      - name: evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: client-rust-test/results/**
+          if-no-files-found: warn
+
+      - name: cluster down
+        if: always()
+        run: make cluster-down
