@@ -78,12 +78,26 @@ impl RegionInfo {
 /// so it can happily connect through the second entry while the first is down (a
 /// follower restarting, say). Reading only `pd[0]` would panic the precondition
 /// checks on a cluster that is, by the client's own standard, perfectly reachable.
+///
+/// Each attempt is bounded. Without a timeout an endpoint that accepts the TCP
+/// connection and then blackholes the request would hang here forever, and the
+/// healthy endpoints later in the list would never be tried — the fallback would
+/// exist but be unreachable. The enclosing test deadlines cannot save us either,
+/// because they are not running: they are blocked inside this await.
+const PD_TIMEOUT: Duration = Duration::from_secs(3);
+
 async fn pd_get(path: &str) -> Value {
+    let client = reqwest::Client::builder()
+        .timeout(PD_TIMEOUT)
+        .connect_timeout(PD_TIMEOUT)
+        .build()
+        .expect("build PD http client");
+
     let addrs = pd_addrs();
     let mut errors = Vec::new();
     for addr in &addrs {
         let url = format!("http://{addr}{path}");
-        match reqwest::get(&url).await {
+        match client.get(&url).send().await {
             Ok(resp) => {
                 let body = resp.text().await.expect("PD response body");
                 return serde_json::from_str(&body)
@@ -93,7 +107,8 @@ async fn pd_get(path: &str) -> Value {
         }
     }
     panic!(
-        "no PD endpoint answered {path} — is the cluster up? (`make cluster-up`)\n{}",
+        "no PD endpoint answered {path} within {PD_TIMEOUT:?} — is the cluster up? \
+         (`make cluster-up`)\n{}",
         errors.join("\n")
     );
 }

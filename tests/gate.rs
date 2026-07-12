@@ -1082,29 +1082,37 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
     // reading the exit code, from the client failing to resolve the orphan. The
     // test then reads as proof of the bug while having proved nothing.
     //
-    // Force the boundary and verify it against PD before going near the assertion.
-    let filler = store.clone();
-    common::cluster::ensure_cross_region(prefix, &primary, &secondary, move |keys| {
-        let store = filler.clone();
-        async move {
-            let mut batch = WriteBatch::new();
-            for k in keys {
-                batch = batch.put(k, val("x"));
-            }
-            // Best-effort: a lost race here just means another round of filler.
-            let _ = store.commit(batch).await;
-        }
-    })
-    .await;
-
     // Manufacture the orphan: an optimistic txn locks the primary and puts the
     // secondary, the primary is invalidated by a racing commit so the orphaner
-    // loses at prewrite, and it is dropped WITHOUT rollback — a crash. The keys
-    // are now provably cross-region, so a couple of rounds only absorb ordinary
-    // timing (a split landing between prewrite batches).
+    // loses at prewrite, and it is dropped WITHOUT rollback — a crash.
     let upper = client_rust_test::prefix_upper_bound(prefix).expect("bounded prefix");
     let mut orphan = None;
     for round in 0..4u32 {
+        // Re-establish the precondition on EVERY attempt, not once up front.
+        //
+        // The boundary is not stable: pd.toml's merge scheduler
+        // (max-merge-region-size = 1) actively coalesces the very small regions
+        // this manufactures, so a boundary confirmed before the loop can be gone by
+        // the time the orphaner prewrites. The prewrite would then be single-region,
+        // no orphan would appear, and the test would panic as a harness failure —
+        // reintroducing, one level up, exactly the "failed for a reason that isn't
+        // the finding" problem this precondition was added to eliminate.
+        //
+        // ensure_cross_region is cheap when already satisfied (one PD read).
+        let filler = store.clone();
+        common::cluster::ensure_cross_region(prefix, &primary, &secondary, move |keys| {
+            let store = filler.clone();
+            async move {
+                let mut batch = WriteBatch::new();
+                for k in keys {
+                    batch = batch.put(k, val("x"));
+                }
+                // Best-effort: a lost race here just means another round of filler.
+                let _ = store.commit(batch).await;
+            }
+        })
+        .await;
+
         let mut orphaner = client
             .begin_with_options(TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn))
             .await
