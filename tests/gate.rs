@@ -42,6 +42,89 @@ fn val(s: &str) -> Bytes {
 }
 
 // ---------------------------------------------------------------------------
+// P. Preconditions — what the rest of the gate assumes about the cluster
+// ---------------------------------------------------------------------------
+
+/// The cluster must be able to split regions at all.
+///
+/// The proposal's headline obligation — a multi-key `commit(WriteBatch)` is
+/// atomic — is only interesting when a batch genuinely spans Raft regions, which
+/// is why `cluster/tikv.toml` sets `region-max-keys = 10`. But nothing verified
+/// that the config was actually in force: if the mount were missing or the
+/// thresholds ignored, every "cross-region" test would quietly run inside one
+/// region and still pass, proving nothing. An assumption no test can fail is not
+/// an assumption, it is a hole.
+///
+/// So write enough keys to force splits and assert against PD that they happened.
+/// Cheap (one batch), and it fails the gate loudly rather than letting the rest
+/// pass vacuously.
+#[tokio::test]
+async fn p0_cluster_can_split_regions() {
+    let store = store(LockMode::Pessimistic).await;
+
+    // A PER-RUN prefix, and deliberately not a fixed one.
+    //
+    // `wipe` deletes keys; it does not delete REGION BOUNDARIES. Under a fixed
+    // prefix, a boundary carved by an earlier run survives into this one, and the
+    // check below would be satisfied instantly by that stale split — passing even
+    // if cluster/tikv.toml were missing and TiKV could no longer split anything.
+    // The test would then assert nothing while looking green, which is the exact
+    // failure it exists to prevent. A fresh range has no boundary to inherit, so
+    // the split it observes must have been made by TiKV, now.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let prefix_owned = format!("gate/p0/{nanos}/");
+    let prefix = prefix_owned.as_bytes();
+
+    let before = common::cluster::region_count().await;
+    let up = common::cluster::stores_up().await;
+    assert!(!up.is_empty(), "PD reports no TiKV store Up");
+
+    // Comfortably past region-max-keys = 10, in one batch.
+    let mut batch = WriteBatch::new();
+    for i in 0..200 {
+        batch = batch.put(key(prefix, &format!("k/{i:04}")), val("v"));
+    }
+    assert_eq!(
+        store.commit(batch).await.expect("seed"),
+        CommitOutcome::Committed
+    );
+
+    // Deliberately waits for TiKV's OWN split checker rather than asking PD to
+    // split at a key (which is what cluster::ensure_cross_region does when a test
+    // needs two *specific* keys separated). The point here is to prove that
+    // `cluster/tikv.toml` is in force — an explicit split would succeed even with
+    // the config missing, and every other test's cross-region claim rests on
+    // natural splitting actually happening.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let lo = key(prefix, "k/0000");
+    let hi = key(prefix, "k/0199");
+    loop {
+        // Both keys located in ONE PD snapshot: two separate lookups could
+        // straddle a split/merge and report a boundary that never existed.
+        if common::cluster::are_cross_region(&lo, &hi).await {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "PRECONDITION FAILED: 200 keys did not split across regions (cluster has {} regions, \
+             was {before}). The gate's multi-region obligations are VOID without splits — check \
+             that cluster/tikv.toml is mounted (region-max-keys = 10).",
+            common::cluster::region_count().await
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    println!(
+        "cluster splits regions: {} -> {} regions, stores Up {up:?}",
+        before,
+        common::cluster::region_count().await
+    );
+}
+
+// ---------------------------------------------------------------------------
 // A. Trait-contract basics
 // ---------------------------------------------------------------------------
 
@@ -993,10 +1076,11 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
     let prefix_owned = format!("gate/d6/{nanos}/");
     let prefix = prefix_owned.as_bytes();
 
-    // primary sorts first, secondary last, with filler between them so the
-    // split checker carves a region boundary into this range.
+    // primary sorts first, secondary last; the region is split at `split_at`,
+    // which sits strictly between them, so the two keys land in different regions.
     let primary = key(prefix, "a-primary"); // lock_keys makes this the primary
     let secondary = key(prefix, "z-secondary");
+    let split_at = key(prefix, "m-split");
     let mut setup = WriteBatch::new().put(primary.clone(), val("p0"));
     for i in 0..30 {
         setup = setup.put(key(prefix, &format!("m-fill/{i:02}")), val("x"));
@@ -1006,13 +1090,37 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
         CommitOutcome::Committed
     );
 
+    // PRECONDITION, asserted against PD rather than hoped for.
+    //
+    // A prewrite request is per region and fails atomically *within* a region, so
+    // the orphan (a lock on the secondary whose primary was never written) can
+    // only exist if the two keys live in DIFFERENT regions. This used to be left
+    // to chance: write some filler, then retry the orphan 8 times and, if no lock
+    // ever appeared, panic "region split never separated the keys". On a cluster
+    // with many small regions, pd.toml's merge scheduler can undo the split faster
+    // than it lands, so that panic fires — and it is indistinguishable, to anything
+    // reading the exit code, from the client failing to resolve the orphan. The
+    // test then reads as proof of the bug while having proved nothing.
+    //
     // Manufacture the orphan: an optimistic txn locks the primary and puts the
     // secondary, the primary is invalidated by a racing commit so the orphaner
-    // loses at prewrite, and it is dropped WITHOUT rollback — a crash. Splits
-    // land asynchronously, so retry until `scan_locks` confirms a real orphan.
+    // loses at prewrite, and it is dropped WITHOUT rollback — a crash.
     let upper = client_rust_test::prefix_upper_bound(prefix).expect("bounded prefix");
     let mut orphan = None;
-    for round in 0..8u32 {
+    for round in 0..4u32 {
+        // Re-establish the precondition on EVERY attempt, not once up front.
+        //
+        // The boundary is not stable: pd.toml's merge scheduler
+        // (max-merge-region-size = 1) actively coalesces the tiny regions this
+        // creates, so a boundary confirmed before the loop can be gone by the time
+        // the orphaner prewrites. The prewrite would then be single-region, no
+        // orphan would appear, and the test would panic as a harness failure —
+        // reintroducing, one level up, exactly the "failed for a reason that isn't
+        // the finding" problem this precondition exists to eliminate.
+        //
+        // Cheap when already satisfied: one PD read.
+        common::cluster::ensure_cross_region(&primary, &secondary, &split_at).await;
+
         let mut orphaner = client
             .begin_with_options(TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn))
             .await
@@ -1052,11 +1160,18 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
             orphan = Some(lock.clone());
             break;
         }
-        println!("round {round}: keys still co-located (single prewrite batch); waiting for split");
+        println!("round {round}: no orphan lock yet (prewrite batching); retrying");
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
     let Some(orphan) = orphan else {
-        panic!("could not manufacture the orphan: region split never separated the keys");
+        // Not a cross-region problem any more — that is asserted above — so this
+        // is a genuine harness failure, and gate-verdict.sh will correctly refuse
+        // to count it as evidence that the #519 gap is still open.
+        panic!(
+            "could not manufacture the orphan even though {:?} and {:?} are in different regions",
+            String::from_utf8_lossy(&primary),
+            String::from_utf8_lossy(&secondary)
+        );
     };
     println!(
         "orphan confirmed: lock on {:?}, primary {:?}, ttl {}ms",

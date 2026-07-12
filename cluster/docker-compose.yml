@@ -8,11 +8,16 @@
 #   multi-key transactions genuinely span Raft regions — the property M4
 #   depends on ("transactions span multiple keys across multiple regions").
 #
-#   docker compose -f cluster/docker-compose.yml up -d   # or: make cluster-up
+# - Images are DIGEST-pinned via cluster/images.env, which scripts/cluster-env.sh
+#   generates from pins.toml. `pingcap/pd:v8.5.5` is a mutable tag: it can be
+#   re-pushed, so a verdict signed against it would not be reproducible later.
+#   Run through `make` — it generates images.env and passes --env-file.
+#
+#   make cluster-up          # NOT `docker compose up` directly: no images.env
 name: client-rust-test-cluster
 services:
   pd:
-    image: pingcap/pd:v8.5.5
+    image: ${PD_IMAGE:?unset — run via `make cluster-up`, which generates cluster/images.env from pins.toml}
     network_mode: host
     command:
       - --name=pd
@@ -25,8 +30,19 @@ services:
       - ./pd.toml:/pd.toml:ro
 
   tikv:
-    image: pingcap/tikv:v8.5.5
+    image: ${TIKV_IMAGE:?unset — run via `make cluster-up`, which generates cluster/images.env from pins.toml}
     network_mode: host
+    # TiKV refuses to start unless it can open ~123880 file descriptors:
+    #   [FATAL] the maximum number of open file descriptors is too small,
+    #           got 65536, expect greater or equal to 123880
+    # Whether it gets them depends on the Docker daemon's default ulimit, which
+    # differs between machines — a workstation daemon often grants enough while a
+    # GitHub runner caps containers at 65536, so the cluster came up locally and
+    # died instantly in CI. Set it explicitly so every environment is the same.
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     command:
       - --pd-endpoints=127.0.0.1:2379
       - --addr=127.0.0.1:20160

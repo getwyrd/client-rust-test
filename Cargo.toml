@@ -28,6 +28,10 @@ log = "0.4"
 env_logger = "0.10"
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+# PD's HTTP API is the ground truth for region layout (tests/common/cluster.rs).
+# rustls, not native-tls: PD is plain HTTP here, and this avoids dragging in an
+# OpenSSL build just to read /pd/api/v1/regions.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # For the failpoint proof (tests/failpoint_gate.rs). Enabling `fail/failpoints`
 # here activates the `after-prewrite` failpoint compiled into tikv-client (via
 # Cargo feature unification), letting the test make a commit fail *after*
