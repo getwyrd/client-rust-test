@@ -4,6 +4,12 @@
 
 #![allow(dead_code)]
 
+/// PD's HTTP API as ground truth for region layout — so the gate's cross-region
+/// obligations are *asserted*, not assumed. Referenced as `common::cluster::…`;
+/// not re-exported here, because `failpoint_gate` shares this module and does not
+/// use it (an unused re-export is a hard error under `-D warnings`).
+pub mod cluster;
+
 use std::env;
 
 use client_rust_test::traits::CommitOutcome;

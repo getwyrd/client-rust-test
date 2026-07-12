@@ -42,6 +42,70 @@ fn val(s: &str) -> Bytes {
 }
 
 // ---------------------------------------------------------------------------
+// P. Preconditions — what the rest of the gate assumes about the cluster
+// ---------------------------------------------------------------------------
+
+/// The cluster must be able to split regions at all.
+///
+/// The proposal's headline obligation — a multi-key `commit(WriteBatch)` is
+/// atomic — is only interesting when a batch genuinely spans Raft regions, which
+/// is why `cluster/tikv.toml` sets `region-max-keys = 10`. But nothing verified
+/// that the config was actually in force: if the mount were missing or the
+/// thresholds ignored, every "cross-region" test would quietly run inside one
+/// region and still pass, proving nothing. An assumption no test can fail is not
+/// an assumption, it is a hole.
+///
+/// So write enough keys to force splits and assert against PD that they happened.
+/// Cheap (one batch), and it fails the gate loudly rather than letting the rest
+/// pass vacuously.
+#[tokio::test]
+async fn p0_cluster_can_split_regions() {
+    const PREFIX: &[u8] = b"gate/p0/";
+    let store = store(LockMode::Pessimistic).await;
+    wipe(&store, PREFIX).await;
+
+    let before = common::cluster::region_count().await;
+    let up = common::cluster::stores_up().await;
+    assert!(!up.is_empty(), "PD reports no TiKV store Up");
+
+    // Comfortably past region-max-keys = 10, in one batch.
+    let mut batch = WriteBatch::new();
+    for i in 0..200 {
+        batch = batch.put(key(PREFIX, &format!("k/{i:04}")), val("v"));
+    }
+    assert_eq!(
+        store.commit(batch).await.expect("seed"),
+        CommitOutcome::Committed
+    );
+
+    // Splits land asynchronously.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let lo = key(PREFIX, "k/0000");
+    let hi = key(PREFIX, "k/0199");
+    loop {
+        if common::cluster::region_of(&lo).await.map(|r| r.id)
+            != common::cluster::region_of(&hi).await.map(|r| r.id)
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "PRECONDITION FAILED: 200 keys did not split across regions (cluster has {} regions, \
+             was {before}). The gate's multi-region obligations are VOID without splits — check \
+             that cluster/tikv.toml is mounted (region-max-keys = 10).",
+            common::cluster::region_count().await
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    println!(
+        "cluster splits regions: {} -> {} regions, stores Up {up:?}",
+        before,
+        common::cluster::region_count().await
+    );
+}
+
+// ---------------------------------------------------------------------------
 // A. Trait-contract basics
 // ---------------------------------------------------------------------------
 
@@ -1006,13 +1070,41 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
         CommitOutcome::Committed
     );
 
+    // PRECONDITION, asserted against PD rather than hoped for.
+    //
+    // A prewrite request is per region and fails atomically *within* a region, so
+    // the orphan (a lock on the secondary whose primary was never written) can
+    // only exist if the two keys live in DIFFERENT regions. This used to be left
+    // to chance: write some filler, then retry the orphan 8 times and, if no lock
+    // ever appeared, panic "region split never separated the keys". On a cluster
+    // with many small regions, pd.toml's merge scheduler can undo the split faster
+    // than it lands, so that panic fires — and it is indistinguishable, to anything
+    // reading the exit code, from the client failing to resolve the orphan. The
+    // test then reads as proof of the bug while having proved nothing.
+    //
+    // Force the boundary and verify it against PD before going near the assertion.
+    let filler = store.clone();
+    common::cluster::ensure_cross_region(prefix, &primary, &secondary, move |keys| {
+        let store = filler.clone();
+        async move {
+            let mut batch = WriteBatch::new();
+            for k in keys {
+                batch = batch.put(k, val("x"));
+            }
+            // Best-effort: a lost race here just means another round of filler.
+            let _ = store.commit(batch).await;
+        }
+    })
+    .await;
+
     // Manufacture the orphan: an optimistic txn locks the primary and puts the
     // secondary, the primary is invalidated by a racing commit so the orphaner
-    // loses at prewrite, and it is dropped WITHOUT rollback — a crash. Splits
-    // land asynchronously, so retry until `scan_locks` confirms a real orphan.
+    // loses at prewrite, and it is dropped WITHOUT rollback — a crash. The keys
+    // are now provably cross-region, so a couple of rounds only absorb ordinary
+    // timing (a split landing between prewrite batches).
     let upper = client_rust_test::prefix_upper_bound(prefix).expect("bounded prefix");
     let mut orphan = None;
-    for round in 0..8u32 {
+    for round in 0..4u32 {
         let mut orphaner = client
             .begin_with_options(TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn))
             .await
@@ -1052,11 +1144,18 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
             orphan = Some(lock.clone());
             break;
         }
-        println!("round {round}: keys still co-located (single prewrite batch); waiting for split");
+        println!("round {round}: no orphan lock yet (prewrite batching); retrying");
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
     let Some(orphan) = orphan else {
-        panic!("could not manufacture the orphan: region split never separated the keys");
+        // Not a cross-region problem any more — that is asserted above — so this
+        // is a genuine harness failure, and gate-verdict.sh will correctly refuse
+        // to count it as evidence that the #519 gap is still open.
+        panic!(
+            "could not manufacture the orphan even though {:?} and {:?} are in different regions",
+            String::from_utf8_lossy(&primary),
+            String::from_utf8_lossy(&secondary)
+        );
     };
     println!(
         "orphan confirmed: lock on {:?}, primary {:?}, ttl {}ms",
