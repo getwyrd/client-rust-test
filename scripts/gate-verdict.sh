@@ -24,9 +24,10 @@ cd "$(git rev-parse --show-toplevel)"
 
 # ─── The expected-red table: "<test-binary>|<test-name>|<why>" ────────────────
 # Each entry asserts the CORRECT behavior and so is red until its fix merges.
-# The fix is already filed upstream; when it lands, XPASS fires here.
+# Both fixes are already filed upstream; when they land, XPASS fires here.
 XFAIL=(
   "gate|d6_orphaned_lock_must_be_resolved_by_client_rust|#519 regression: an orphaned lock is never resolved (fix: tikv/client-rust#544)"
+  "failpoint_gate|d7_pessimistic_rollback_leaves_prewrite_locks|#545: pessimistic rollback leaves prewrite locks (fix: tikv/client-rust#547)"
 )
 
 rc=0
