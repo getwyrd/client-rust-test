@@ -54,7 +54,7 @@ async fn locks_on(client: &TransactionClient, key: &[u8]) -> usize {
 #[tokio::test]
 async fn d7_pessimistic_rollback_leaves_prewrite_locks() {
     let _ = env_logger::try_init();
-    let client = TransactionClient::new(common::pd_addrs())
+    let client = TransactionClient::new(harness::pd_addrs())
         .await
         .expect("connect to TiKV — is the cluster up? (`make cluster-up`)");
     let scenario = FailScenario::setup();

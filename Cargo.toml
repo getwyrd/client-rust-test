@@ -1,45 +1,49 @@
-[package]
-name = "client-rust-test"
-version = "0.1.0"
+# The TiKV client parity harness — a Cargo workspace.
+#
+# The repo's purpose is to find and close behavioural gaps between the TiKV Rust
+# client (tikv/client-rust) and the Go client (tikv/client-go). The members split
+# along that purpose:
+#
+#   harness    client-agnostic fixtures: $PD_ADDRS, PD ground truth for region
+#              layout, deterministic byte corpora. Anything a suite OR a future
+#              differential runner needs, and that says nothing about wyrd.
+#   wyrd-gate  the M4 evaluation gate — an application-contract suite driven over
+#              tikv-client. It was once the whole repo; it is now one suite among
+#              the ones to come, and the template for them.
+#
+# The crate under test is a PATH dependency on the sibling checkout, deliberately:
+# pointing the harness at a local branch to prove a fix is the entire point of the
+# repo. Cargo records no source or rev for a path dep, so the LOCKFILE PINS
+# NOTHING — pins.toml plus scripts/provenance.sh is what closes that hole, by
+# recording and asserting what was actually exercised.
+
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
 edition = "2021"
-# Matches the crate under test (client-rust pins 1.93).
-rust-version = "1.93"
+rust-version = "1.93" # matches the crate under test (client-rust pins 1.93)
 license = "Apache-2.0"
 publish = false
-description = "Wyrd M4 evaluation gate: the MetadataStore contract prototyped over tikv-client (tikv/client-rust), driven against a real TiKV/PD cluster."
 
-[features]
-# Gate the cluster-backed tests exactly like client-rust does: they need a
-# reachable TiKV/PD (see cluster/ and $PD_ADDRS) and are skipped by default.
-integration-tests = []
-
-[dependencies]
-# The crate under test — the sibling checkout, so local work on client-rust
-# is what the gate exercises. Deliberately the ONLY path dependency: the
-# wyrd MetadataStore contract is vendored into src/traits.rs, not depended
-# on, so this harness stays standalone.
+[workspace.dependencies]
+# THE pin point: declared once, inherited by every member that writes
+# `tikv-client.workspace = true`.
 tikv-client = { path = "../client-rust" }
+
+harness = { path = "crates/harness" }
 
 async-trait = "0.1"
 bytes = "1"
-log = "0.4"
-
-[dev-dependencies]
 env_logger = "0.10"
+log = "0.4"
+# PD's HTTP API is the ground truth for region layout. rustls, not native-tls: PD
+# is plain HTTP here, and this avoids an OpenSSL build just to read /pd/api/v1/*.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
-# PD's HTTP API is the ground truth for region layout (tests/common/cluster.rs).
-# rustls, not native-tls: PD is plain HTTP here, and this avoids dragging in an
-# OpenSSL build just to read /pd/api/v1/regions.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-# For the failpoint proof (tests/failpoint_gate.rs). Enabling `fail/failpoints`
-# here activates the `after-prewrite` failpoint compiled into tikv-client (via
-# Cargo feature unification), letting the test make a commit fail *after*
-# prewrite has placed its locks. Only affects the test build, not the library.
-fail = { version = "0.4", features = ["failpoints"] }
 
-# The failpoint proof is its own binary: the `fail` registry is process-global,
-# so it must not share a process with the parallel commits in `gate`.
-[[test]]
-name = "failpoint_gate"
-path = "tests/failpoint_gate.rs"
+# Fault injection. Deliberately WITHOUT the `failpoints` feature here — see
+# crates/wyrd-gate/Cargo.toml, where it is opt-in.
+fail = "0.4"

@@ -23,32 +23,52 @@ requires an *evaluation gate* before the dependency is committed:
 - confirm the **multi-key atomic `commit(WriteBatch)`** mapping holds under
   real contention.
 
-This repo is that gate:
+The gate lives in the `wyrd-gate` crate — one suite in this workspace, and the
+template for the client-parity suites to come:
 
-- [`src/traits.rs`](src/traits.rs) — the `MetadataStore` contract, **vendored
-  verbatim** from wyrd (`crates/traits/src/lib.rs` @ 7009c2e). Copied, not
-  depended on, so the harness stays standalone; M4's premise is that this
-  surface is frozen, and any needed re-copy would itself be a gate finding.
-- [`src/lib.rs`](src/lib.rs) — `TikvMetadataStore`, the exact
-  `WriteBatch → one TiKV transaction` translation the future `metadata-tikv`
-  crate will use: pessimistic `get_for_update` by default, optimistic +
-  `lock_keys` as the measured alternative, write-conflict → `Ok(Conflict)`
-  classification, paged native prefix scan, rollback discipline.
-- [`tests/gate.rs`](tests/gate.rs) — the gate proper; every test names the
-  proposal obligation it verifies.
+- [`crates/wyrd-gate/src/traits.rs`](crates/wyrd-gate/src/traits.rs) — the
+  `MetadataStore` contract, **vendored verbatim** from wyrd
+  (`crates/traits/src/lib.rs` @ 7009c2e). Copied, not depended on, so the harness
+  stays standalone; M4's premise is that this surface is frozen, and any needed
+  re-copy would itself be a gate finding.
+- [`crates/wyrd-gate/src/lib.rs`](crates/wyrd-gate/src/lib.rs) —
+  `TikvMetadataStore`, the exact `WriteBatch → one TiKV transaction` translation
+  the future `metadata-tikv` crate will use: pessimistic `get_for_update` by
+  default, optimistic + `lock_keys` as the measured alternative, write-conflict →
+  `Ok(Conflict)` classification, paged native prefix scan, rollback discipline.
+- [`crates/wyrd-gate/tests/gate.rs`](crates/wyrd-gate/tests/gate.rs) — the gate
+  proper; every test names the proposal obligation it verifies.
+- [`crates/harness`](crates/harness) — client-agnostic fixtures: `$PD_ADDRS`, and
+  PD's region layout as ground truth, so the gate's cross-region obligations are
+  *asserted* rather than assumed. Nothing here knows what a `MetadataStore` is,
+  which is what lets a future differential runner share it.
 
 ## Layout
 
-Developed against a sibling checkout of the crate under test (a path
-dependency, so local work on client-rust is what the gate exercises):
+A Cargo workspace, developed against a sibling checkout of the crate under test (a
+path dependency, so local work on client-rust is what the gate exercises):
 
 ```
 wyrd/
 ├── client-rust/        # tikv/client-rust — the crate under test
 └── client-rust-test/   # this harness (depends only on ../client-rust)
+    ├── crates/
+    │   ├── harness/    # client-agnostic: $PD_ADDRS, PD region ground truth
+    │   └── wyrd-gate/  # the M4 evaluation gate (one suite among those to come)
+    ├── cluster/        # throwaway single-node PD + TiKV (digest-pinned)
+    ├── scripts/        # pins, provenance, the verdict
+    ├── findings/       # the harness's output: write-ups, repros, evidence
+    └── pins.toml       # what is under test — the single source of truth
 ```
 
 Toolchain is pinned to 1.93.0, matching client-rust.
+
+**Which revision is under test?** The dependency is a path dep, and Cargo records
+no source or rev for one — so `Cargo.lock` pins *nothing*. `pins.toml` names the
+revision, and every run stamps what was actually exercised
+(`results/provenance.json`). `PARITY_STRICT=1` (which CI sets) refuses to run at all
+when the two disagree, so a result can never quietly be about a different tree than
+it claims.
 
 ## Usage
 
@@ -59,9 +79,19 @@ make cluster-down   # tear down the cluster and its data
 # individually:
 make cluster-up     # docker-compose PD + TiKV v8.5.5 (client-rust's CI pin)
 make unit-test      # cluster-free tests (prefix math, error classification)
-make gate-test      # the cluster-backed gate ($PD_ADDRS, default 127.0.0.1:2379)
+make verdict        # the gate, checked against the verdict EXPECTED at the pin
+make gate-test      # the cluster-backed gate, raw ($PD_ADDRS, default 127.0.0.1:2379)
+make failpoint-test # the failpoint proof (opt-in `failpoints` feature)
+make pins-check     # pins.toml agrees with everything, and names an upstream commit
 make check          # fmt --check, clippy -D warnings, cargo check
 ```
+
+`make verdict` is what CI runs, and it is the one to trust. Plain pass/fail is
+meaningless here: the harness carries no workarounds for client bugs, so a
+deficiency is a **failing test**, and at the pinned revision the *correct* outcome
+is "green except `d6` and `d7`". The verdict encodes that, requires each
+expected-red test to fail **on its own assertion**, and fails loudly if one ever
+passes — that is how you find out the day a gap is fixed upstream.
 
 The cluster ([`cluster/`](cluster/)) is a throwaway single-node PD + TiKV with
 client-rust CI's aggressive region-split thresholds, so multi-key transactions

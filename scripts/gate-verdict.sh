@@ -41,8 +41,19 @@ XFAIL=(
 )
 
 rc=0
+
 # failpoint_gate must be single-threaded: the `fail` registry is process-global.
 flags_for() { [ "$1" = failpoint_gate ] && echo "--test-threads=1" || echo ""; }
+
+# Only the failpoint binary is built with fault injection. `gate` must observe an
+# UNMODIFIED client, so it never gets the `failpoints` feature.
+features_for() {
+    if [ "$1" = failpoint_gate ]; then
+        echo "integration-tests,failpoints"
+    else
+        echo "integration-tests"
+    fi
+}
 
 # ─── 1. Everything that is expected to PASS ──────────────────────────────────
 for bin in gate failpoint_gate; do
@@ -53,7 +64,7 @@ for bin in gate failpoint_gate; do
   done
   echo "═══ $bin: the tests expected to pass ═══"
   # shellcheck disable=SC2046
-  if cargo test --features integration-tests --test "$bin" -- --show-output \
+  if cargo test -p wyrd-gate --features "$(features_for "$bin")" --test "$bin" -- --show-output \
        $(flags_for "$bin") "${skips[@]}"; then
     echo "OK: $bin is green apart from its expected-red tests."
   else
@@ -70,7 +81,7 @@ for row in "${XFAIL[@]}"; do
   echo "    expected red — $why"
   out=$(mktemp)
   # shellcheck disable=SC2046
-  cargo test --features integration-tests --test "$bin" -- --show-output \
+  cargo test -p wyrd-gate --features "$(features_for "$bin")" --test "$bin" -- --show-output \
        $(flags_for "$bin") --exact "$test" >"$out" 2>&1
   status=$?
   cat "$out"
