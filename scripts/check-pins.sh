@@ -60,26 +60,57 @@ else
   note "go/go.mod not present yet — skipping (arrives with the Go runner)"
 fi
 
-# ── 3. The client-rust pin MUST be an ancestor of upstream/master ────────────
+# ── 3. The client-rust pin MUST be an ancestor of upstream's master ──────────
 # Without this, the harness could quietly certify a verdict against fork-only
-# work. We read the sibling's existing remote-tracking ref; we never fetch.
-if [ -d "$CLIENT_RUST/.git" ]; then
-  if git -C "$CLIENT_RUST" rev-parse --verify -q upstream/master >/dev/null; then
-    if git -C "$CLIENT_RUST" merge-base --is-ancestor "$RUST_REV" upstream/master; then
-      note "client_rust.rev is an ancestor of upstream/master — OK"
-    else
-      bad "client_rust.rev $RUST_REV is NOT an ancestor of upstream/master.
-       The pin names a commit that is not upstream, so any gap stated against it
-       is unfileable and any fix has nowhere to land. Re-pin to an upstream commit.
-       (If upstream/master is merely stale, refresh it in YOUR OWN clone — never
-       fetch inside a checkout another session is using.)"
-    fi
+# work that can never be upstreamed.
+#
+# The upstream repo is NOT always a remote called "upstream". Locally the sibling
+# has origin=fork + upstream=tikv; in CI, actions/checkout clones tikv/client-rust
+# as ORIGIN and there is no `upstream` remote at all. Keying off the remote's NAME
+# meant CI silently took the "cannot verify" branch and still reported "pins OK" —
+# the check never ran where it mattered most. So resolve the remote by URL, and
+# under PARITY_STRICT (CI) treat "cannot verify" as a FAILURE, not a shrug: an
+# unverifiable invariant is not a satisfied one.
+#
+# Read-only: we never fetch inside the checkout (another session may be using it).
+STRICT="${PARITY_STRICT:-0}"
+norm_url() { sed -E 's#\.git$##; s#/$##; s#^git@github\.com:#https://github.com/#' <<<"$1"; }
+
+cannot_verify() {
+  if [ "$STRICT" = "1" ]; then
+    bad "cannot verify that client_rust.rev is an upstream commit ($1).
+       Under PARITY_STRICT this is a failure, not a skip: a run that cannot check
+       the invariant cannot be evidence for it. Ensure the client-rust checkout has
+       a remote pointing at $RUST_UPSTREAM with its default branch fetched
+       (in CI: actions/checkout with fetch-depth: 0)."
   else
-    note "no upstream/master ref in $CLIENT_RUST — cannot verify ancestry."
-    note "add it with:  git -C $CLIENT_RUST remote add upstream $RUST_UPSTREAM"
+    note "cannot verify ancestry ($1) — advisory only; CI enforces this."
+  fi
+}
+
+if [ -d "$CLIENT_RUST/.git" ]; then
+  want=$(norm_url "$RUST_UPSTREAM")
+  upstream_remote=""
+  while read -r name url; do
+    [ "$(norm_url "$url")" = "$want" ] && { upstream_remote="$name"; break; }
+  done < <(git -C "$CLIENT_RUST" remote -v | awk '$3=="(fetch)"{print $1, $2}')
+
+  if [ -z "$upstream_remote" ]; then
+    cannot_verify "no remote points at $RUST_UPSTREAM"
+  else
+    ref="$upstream_remote/master"
+    if ! git -C "$CLIENT_RUST" rev-parse --verify -q "$ref" >/dev/null; then
+      cannot_verify "$ref is not fetched (shallow clone?)"
+    elif git -C "$CLIENT_RUST" merge-base --is-ancestor "$RUST_REV" "$ref"; then
+      note "client_rust.rev is an ancestor of $ref — OK"
+    else
+      bad "client_rust.rev $RUST_REV is NOT an ancestor of $ref.
+       The pin names a commit that is not upstream, so any gap stated against it is
+       unfileable and any fix has nowhere to land. Re-pin to an upstream commit."
+    fi
   fi
 else
-  note "$CLIENT_RUST is not a git checkout — skipping ancestry check"
+  cannot_verify "$CLIENT_RUST is not a git checkout"
 fi
 
 # ── 4. compose must consume the pinned images, not hardcode a tag ────────────

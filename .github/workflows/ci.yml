@@ -62,6 +62,10 @@ jobs:
           repository: tikv/client-rust
           ref: ${{ needs.pins.outputs.client_rust_rev }}
           path: client-rust
+          # Full history: check-pins.sh must resolve origin/master to prove the
+          # pin is an ancestor of upstream. A shallow clone has no branch refs,
+          # and under PARITY_STRICT that is now a hard failure (as it should be).
+          fetch-depth: 0
 
       # No protoc step: client-rust has no build.rs and its `proto-build` member
       # is not in our dependency graph. (Its own CI needs protoc; we do not.)
@@ -92,6 +96,10 @@ jobs:
           repository: tikv/client-rust
           ref: ${{ needs.pins.outputs.client_rust_rev }}
           path: client-rust
+          # Full history: check-pins.sh must resolve origin/master to prove the
+          # pin is an ancestor of upstream. A shallow clone has no branch refs,
+          # and under PARITY_STRICT that is now a hard failure (as it should be).
+          fetch-depth: 0
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: client-rust-test }
 
