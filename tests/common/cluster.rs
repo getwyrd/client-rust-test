@@ -115,6 +115,32 @@ async fn pd_get(path: &str) -> Value {
     );
 }
 
+/// POST to PD, with the same endpoint-fallback and timeout discipline as `pd_get`.
+/// Returns the endpoint's error rather than panicking: a rejected split is a thing
+/// the caller retries, not a broken harness.
+async fn pd_post(path: &str, body: &Value) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(PD_TIMEOUT)
+        .connect_timeout(PD_TIMEOUT)
+        .build()
+        .expect("build PD http client");
+
+    let mut errors = Vec::new();
+    for addr in &pd_addrs() {
+        let url = format!("http://{addr}{path}");
+        match client.post(&url).json(body).send().await {
+            Ok(resp) if resp.status().is_success() => return Ok(()),
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                errors.push(format!("{url}: HTTP {status}: {}", text.trim()));
+            }
+            Err(e) => errors.push(format!("{url}: {e}")),
+        }
+    }
+    Err(errors.join("; "))
+}
+
 async fn try_pd(client: &reqwest::Client, url: &str) -> Result<Value, String> {
     let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
@@ -212,62 +238,94 @@ pub async fn stores_up() -> Vec<u64> {
         .unwrap_or_default()
 }
 
-/// Wait until a region boundary separates `lo` from `hi`, writing filler keys
-/// between them to provoke the split.
+/// Ask PD to split the region holding `at` exactly at `at`.
 ///
-/// Splits only happen where data is, so a boundary has to be *manufactured*
-/// between the two specific keys a test cares about — a globally well-split
-/// cluster says nothing about whether `lo` and `hi` are separated.
+/// `policy: "usekey"` makes PD cut at the key we name rather than wherever its
+/// split checker fancies. The key goes over the wire memcomparable-hex, the same
+/// encoding PD reports bounds in.
+async fn split_region_at(region_id: u64, at: &[u8]) -> Result<(), String> {
+    let hex: String = encode_key(at).iter().map(|b| format!("{b:02x}")).collect();
+    let body = serde_json::json!({
+        "name": "split-region",
+        "region_id": region_id,
+        "policy": "usekey",
+        "keys": [hex],
+    });
+    pd_post("/pd/api/v1/operators", &body).await
+}
+
+/// Guarantee that `lo` and `hi` sit in different Raft regions, by splitting at
+/// `split_at` — which must sort strictly after `lo` and at-or-before `hi`.
 ///
-/// It has to be a poll, not a one-shot: `cluster/pd.toml` runs an aggressive
-/// merge scheduler (`max-merge-region-size = 1`), so a freshly split pair of tiny
-/// regions can be merged straight back together. On a cluster with many small
-/// regions the merge can outrun the split, which is exactly how d6 used to fail
-/// *before reaching its assertion* and get miscounted as proof of the bug.
+/// The gate's cross-region obligations are void without this, so it is a
+/// *precondition*: it either holds, or the test fails naming it. It never
+/// silently degrades into a same-region test that would pass while proving nothing.
 ///
-/// Panics on timeout, naming the precondition — a test needing cross-region keys
-/// must never silently degrade into a same-region test that proves nothing.
-pub async fn ensure_cross_region<F, Fut>(prefix: &[u8], lo: &[u8], hi: &[u8], mut write_filler: F)
-where
-    F: FnMut(Vec<Vec<u8>>) -> Fut,
-    Fut: std::future::Future<Output = ()>,
-{
+/// # Why PD is told where to cut, rather than being coaxed
+///
+/// The obvious approach — write filler keys between `lo` and `hi` and wait for the
+/// split checker to carve them apart — is a race, and on a busy cluster it is a
+/// race you lose. TiKV picks a split point for the *whole region*, so when that
+/// region holds a lot of other data the cut usually lands somewhere else, and you
+/// need many splits before one happens to fall between two adjacent keys. Measured:
+/// 1 round on a pristine cluster, 54 rounds after the rest of the suite has run,
+/// and >77 rounds (a 45s timeout) on CI. Raising the timeout would only have made
+/// it a slower race.
+///
+/// `policy: "usekey"` removes the race: PD cuts exactly where we say, immediately,
+/// and it works even where no data exists yet.
+///
+/// It still has to be a *loop*, because pd.toml runs an aggressive merge scheduler
+/// (`max-merge-region-size = 1`) that will happily glue the tiny regions back
+/// together — so callers must re-establish the precondition per attempt, and this
+/// re-issues the split if the boundary has been merged away.
+pub async fn ensure_cross_region(lo: &[u8], hi: &[u8], split_at: &[u8]) {
+    assert!(
+        lo < split_at && split_at <= hi,
+        "split_at must sort strictly after lo and at-or-before hi \
+         (lo={lo:?} split_at={split_at:?} hi={hi:?})"
+    );
+
     const TIMEOUT: Duration = Duration::from_secs(45);
     let deadline = Instant::now() + TIMEOUT;
-    let mut round = 0u32;
+    let mut attempts = 0u32;
 
     loop {
         // One snapshot decides it, and the same snapshot is what gets reported —
         // re-reading PD for the log line would print ids that never coexisted.
-        if let (Some(a), Some(b)) = region_pair(lo, hi).await {
+        let snapshot = regions().await;
+        let a = locate(&snapshot, lo).map(|r| r.id);
+        let b = locate(&snapshot, hi).map(|r| r.id);
+        if let (Some(a), Some(b)) = (a, b) {
             if a != b {
-                println!("cross-region precondition met after {round} round(s): {a} != {b}");
+                println!(
+                    "cross-region precondition met after {attempts} split request(s): {a} != {b}"
+                );
                 return;
             }
         }
 
         assert!(
             Instant::now() < deadline,
-            "PRECONDITION FAILED: no region boundary separates {lo:?} from {hi:?} after {TIMEOUT:?} \
-             ({} rounds of filler, cluster has {} regions).\n\
+            "PRECONDITION FAILED: no region boundary separates {lo:?} from {hi:?} after \
+             {TIMEOUT:?} and {attempts} split request(s) (cluster has {} regions).\n\
              The test needs these keys in DIFFERENT Raft regions; without that it would pass \
-             vacuously and prove nothing. Check that cluster/tikv.toml is mounted \
-             (region-max-keys = 10) and that pd.toml's merge scheduler is not undoing the split.",
-            round,
-            region_count().await,
+             vacuously and prove nothing. PD refused or immediately merged away the split at \
+             {split_at:?} — check pd.toml's merge scheduler.",
+            snapshot.len(),
         );
 
-        // Filler strictly between lo and hi, so the split checker has data to cut.
-        let batch: Vec<Vec<u8>> = (0..40)
-            .map(|i| {
-                let mut k = prefix.to_vec();
-                k.extend_from_slice(format!("m-fill/{round:03}{i:03}").as_bytes());
-                k
-            })
-            .collect();
-        write_filler(batch).await;
-
-        round += 1;
+        // Split the region that currently holds `lo` — that is the one straddling
+        // the two keys. If PD declines (e.g. it is already splitting), just retry.
+        if let Some(region) = locate(&snapshot, lo) {
+            if let Err(e) = split_region_at(region.id, split_at).await {
+                println!(
+                    "split request for region {} rejected ({e}); retrying",
+                    region.id
+                );
+            }
+        }
+        attempts += 1;
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }

@@ -78,7 +78,12 @@ async fn p0_cluster_can_split_regions() {
         CommitOutcome::Committed
     );
 
-    // Splits land asynchronously.
+    // Deliberately waits for TiKV's OWN split checker rather than asking PD to
+    // split at a key (which is what cluster::ensure_cross_region does when a test
+    // needs two *specific* keys separated). The point here is to prove that
+    // `cluster/tikv.toml` is in force — an explicit split would succeed even with
+    // the config missing, and every other test's cross-region claim rests on
+    // natural splitting actually happening.
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     let lo = key(PREFIX, "k/0000");
     let hi = key(PREFIX, "k/0199");
@@ -1057,10 +1062,11 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
     let prefix_owned = format!("gate/d6/{nanos}/");
     let prefix = prefix_owned.as_bytes();
 
-    // primary sorts first, secondary last, with filler between them so the
-    // split checker carves a region boundary into this range.
+    // primary sorts first, secondary last; the region is split at `split_at`,
+    // which sits strictly between them, so the two keys land in different regions.
     let primary = key(prefix, "a-primary"); // lock_keys makes this the primary
     let secondary = key(prefix, "z-secondary");
+    let split_at = key(prefix, "m-split");
     let mut setup = WriteBatch::new().put(primary.clone(), val("p0"));
     for i in 0..30 {
         setup = setup.put(key(prefix, &format!("m-fill/{i:02}")), val("x"));
@@ -1091,27 +1097,15 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
         // Re-establish the precondition on EVERY attempt, not once up front.
         //
         // The boundary is not stable: pd.toml's merge scheduler
-        // (max-merge-region-size = 1) actively coalesces the very small regions
-        // this manufactures, so a boundary confirmed before the loop can be gone by
-        // the time the orphaner prewrites. The prewrite would then be single-region,
-        // no orphan would appear, and the test would panic as a harness failure —
+        // (max-merge-region-size = 1) actively coalesces the tiny regions this
+        // creates, so a boundary confirmed before the loop can be gone by the time
+        // the orphaner prewrites. The prewrite would then be single-region, no
+        // orphan would appear, and the test would panic as a harness failure —
         // reintroducing, one level up, exactly the "failed for a reason that isn't
-        // the finding" problem this precondition was added to eliminate.
+        // the finding" problem this precondition exists to eliminate.
         //
-        // ensure_cross_region is cheap when already satisfied (one PD read).
-        let filler = store.clone();
-        common::cluster::ensure_cross_region(prefix, &primary, &secondary, move |keys| {
-            let store = filler.clone();
-            async move {
-                let mut batch = WriteBatch::new();
-                for k in keys {
-                    batch = batch.put(k, val("x"));
-                }
-                // Best-effort: a lost race here just means another round of filler.
-                let _ = store.commit(batch).await;
-            }
-        })
-        .await;
+        // Cheap when already satisfied: one PD read.
+        common::cluster::ensure_cross_region(&primary, &secondary, &split_at).await;
 
         let mut orphaner = client
             .begin_with_options(TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn))
