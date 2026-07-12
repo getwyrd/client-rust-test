@@ -60,9 +60,23 @@ fn val(s: &str) -> Bytes {
 /// pass vacuously.
 #[tokio::test]
 async fn p0_cluster_can_split_regions() {
-    const PREFIX: &[u8] = b"gate/p0/";
     let store = store(LockMode::Pessimistic).await;
-    wipe(&store, PREFIX).await;
+
+    // A PER-RUN prefix, and deliberately not a fixed one.
+    //
+    // `wipe` deletes keys; it does not delete REGION BOUNDARIES. Under a fixed
+    // prefix, a boundary carved by an earlier run survives into this one, and the
+    // check below would be satisfied instantly by that stale split — passing even
+    // if cluster/tikv.toml were missing and TiKV could no longer split anything.
+    // The test would then assert nothing while looking green, which is the exact
+    // failure it exists to prevent. A fresh range has no boundary to inherit, so
+    // the split it observes must have been made by TiKV, now.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let prefix_owned = format!("gate/p0/{nanos}/");
+    let prefix = prefix_owned.as_bytes();
 
     let before = common::cluster::region_count().await;
     let up = common::cluster::stores_up().await;
@@ -71,7 +85,7 @@ async fn p0_cluster_can_split_regions() {
     // Comfortably past region-max-keys = 10, in one batch.
     let mut batch = WriteBatch::new();
     for i in 0..200 {
-        batch = batch.put(key(PREFIX, &format!("k/{i:04}")), val("v"));
+        batch = batch.put(key(prefix, &format!("k/{i:04}")), val("v"));
     }
     assert_eq!(
         store.commit(batch).await.expect("seed"),
@@ -85,8 +99,8 @@ async fn p0_cluster_can_split_regions() {
     // the config missing, and every other test's cross-region claim rests on
     // natural splitting actually happening.
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    let lo = key(PREFIX, "k/0000");
-    let hi = key(PREFIX, "k/0199");
+    let lo = key(prefix, "k/0000");
+    let hi = key(prefix, "k/0199");
     loop {
         // Both keys located in ONE PD snapshot: two separate lookups could
         // straddle a split/merge and report a boundary that never existed.
