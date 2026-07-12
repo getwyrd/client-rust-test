@@ -83,9 +83,9 @@ async fn p0_cluster_can_split_regions() {
     let lo = key(PREFIX, "k/0000");
     let hi = key(PREFIX, "k/0199");
     loop {
-        if common::cluster::region_of(&lo).await.map(|r| r.id)
-            != common::cluster::region_of(&hi).await.map(|r| r.id)
-        {
+        // Both keys located in ONE PD snapshot: two separate lookups could
+        // straddle a split/merge and report a boundary that never existed.
+        if common::cluster::are_cross_region(&lo, &hi).await {
             break;
         }
         assert!(

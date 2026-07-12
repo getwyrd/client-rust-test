@@ -72,16 +72,30 @@ impl RegionInfo {
     }
 }
 
+/// GET from PD, trying every endpoint in `$PD_ADDRS` before giving up.
+///
+/// `$PD_ADDRS` is comma-separated and the client under test is handed all of them,
+/// so it can happily connect through the second entry while the first is down (a
+/// follower restarting, say). Reading only `pd[0]` would panic the precondition
+/// checks on a cluster that is, by the client's own standard, perfectly reachable.
 async fn pd_get(path: &str) -> Value {
-    let pd = pd_addrs();
-    let url = format!("http://{}{}", pd[0], path);
-    let body = reqwest::get(&url)
-        .await
-        .unwrap_or_else(|e| panic!("PD {url}: {e} — is the cluster up? (`make cluster-up`)"))
-        .text()
-        .await
-        .expect("PD response body");
-    serde_json::from_str(&body).unwrap_or_else(|e| panic!("PD {url} returned non-JSON: {e}"))
+    let addrs = pd_addrs();
+    let mut errors = Vec::new();
+    for addr in &addrs {
+        let url = format!("http://{addr}{path}");
+        match reqwest::get(&url).await {
+            Ok(resp) => {
+                let body = resp.text().await.expect("PD response body");
+                return serde_json::from_str(&body)
+                    .unwrap_or_else(|e| panic!("PD {url} returned non-JSON: {e} / {body}"));
+            }
+            Err(e) => errors.push(format!("  {url}: {e}")),
+        }
+    }
+    panic!(
+        "no PD endpoint answered {path} — is the cluster up? (`make cluster-up`)\n{}",
+        errors.join("\n")
+    );
 }
 
 fn hex_to_bytes(s: &str) -> Vec<u8> {
@@ -112,18 +126,40 @@ pub async fn regions() -> Vec<RegionInfo> {
         .collect()
 }
 
-/// The region currently holding `key` (raw; encoded here before comparing).
-pub async fn region_of(key: &[u8]) -> Option<RegionInfo> {
+/// Locate `key` within an already-fetched region snapshot.
+fn locate<'a>(snapshot: &'a [RegionInfo], key: &[u8]) -> Option<&'a RegionInfo> {
     let encoded = encode_key(key);
-    regions().await.into_iter().find(|r| r.contains(&encoded))
+    snapshot.iter().find(|r| r.contains(&encoded))
 }
 
-/// Are these two keys in different regions right now?
+/// The region currently holding `key` (raw; encoded here before comparing).
+///
+/// For *two* keys use [`region_pair`] — never call this twice. See the note there.
+pub async fn region_of(key: &[u8]) -> Option<RegionInfo> {
+    locate(&regions().await, key).cloned()
+}
+
+/// Which regions hold `a` and `b`, **as of one PD snapshot**.
+///
+/// This must be a single fetch. Calling `region_of(a)` then `region_of(b)` issues
+/// two independent `/regions` reads, and the layout can change between them — the
+/// cluster is actively splitting, and `pd.toml`'s merge scheduler is actively
+/// undoing splits. Two ids drawn from different snapshots can differ without the
+/// keys ever having been in different regions *at the same moment*, which would
+/// report the cross-region precondition as met when it never held. That failure
+/// mode is precisely the merge race this module exists to defend against, so the
+/// comparison has to come from one consistent view.
+pub async fn region_pair(a: &[u8], b: &[u8]) -> (Option<u64>, Option<u64>) {
+    let snapshot = regions().await;
+    (
+        locate(&snapshot, a).map(|r| r.id),
+        locate(&snapshot, b).map(|r| r.id),
+    )
+}
+
+/// Are these two keys in different regions, in a single PD view?
 pub async fn are_cross_region(a: &[u8], b: &[u8]) -> bool {
-    match (region_of(a).await, region_of(b).await) {
-        (Some(ra), Some(rb)) => ra.id != rb.id,
-        _ => false,
-    }
+    matches!(region_pair(a, b).await, (Some(x), Some(y)) if x != y)
 }
 
 /// TiKV store ids PD reports as `Up`.
@@ -166,14 +202,13 @@ where
     let mut round = 0u32;
 
     loop {
-        if are_cross_region(lo, hi).await {
-            let (a, b) = (region_of(lo).await, region_of(hi).await);
-            println!(
-                "cross-region precondition met after {round} round(s): {:?} != {:?}",
-                a.map(|r| r.id),
-                b.map(|r| r.id)
-            );
-            return;
+        // One snapshot decides it, and the same snapshot is what gets reported —
+        // re-reading PD for the log line would print ids that never coexisted.
+        if let (Some(a), Some(b)) = region_pair(lo, hi).await {
+            if a != b {
+                println!("cross-region precondition met after {round} round(s): {a} != {b}");
+                return;
+            }
         }
 
         assert!(
@@ -205,6 +240,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::encode_key;
+    use super::locate;
+    use super::RegionInfo;
 
     #[test]
     fn encodes_a_full_group_with_a_trailing_pad_group() {
@@ -239,5 +276,51 @@ mod tests {
             encoded, expected,
             "memcomparable encoding must be order-preserving"
         );
+    }
+
+    /// A snapshot split at `mid`: [.., mid) and [mid, ..).
+    fn snapshot(mid: &[u8]) -> Vec<RegionInfo> {
+        let bound = encode_key(mid);
+        vec![
+            RegionInfo {
+                id: 1,
+                start: Vec::new(), // unbounded left
+                end: bound.clone(),
+            },
+            RegionInfo {
+                id: 2,
+                start: bound,
+                end: Vec::new(), // unbounded right
+            },
+        ]
+    }
+
+    #[test]
+    fn locate_respects_region_bounds() {
+        let snap = snapshot(b"m");
+        // start is INCLUSIVE, end is EXCLUSIVE — the boundary key itself belongs
+        // to the region that starts there, not the one that ends there.
+        assert_eq!(locate(&snap, b"a").map(|r| r.id), Some(1));
+        assert_eq!(locate(&snap, b"m").map(|r| r.id), Some(2));
+        assert_eq!(locate(&snap, b"z").map(|r| r.id), Some(2));
+    }
+
+    #[test]
+    fn locate_handles_unbounded_ends() {
+        // Empty start/end mean "unbounded", NOT "the empty key" — treating them as
+        // a literal bound would put every key in region 1 and quietly report every
+        // pair as same-region, defeating the precondition.
+        let snap = snapshot(b"m");
+        assert_eq!(locate(&snap, b"").map(|r| r.id), Some(1));
+        assert_eq!(locate(&snap, &[0xFF; 64]).map(|r| r.id), Some(2));
+    }
+
+    #[test]
+    fn locate_separates_keys_that_straddle_a_boundary() {
+        // The property d6 depends on.
+        let snap = snapshot(b"m");
+        let lo = locate(&snap, b"a-primary").map(|r| r.id);
+        let hi = locate(&snap, b"z-secondary").map(|r| r.id);
+        assert_ne!(lo, hi, "keys either side of the split must be cross-region");
     }
 }
