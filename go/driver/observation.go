@@ -108,6 +108,12 @@ func driverError(d string) *Observation { return &Observation{Class: "driver_err
 // lockKind renders kvrpcpb.Op BY NAME. Both clients generate this enum from the same
 // proto, so the name is exact — and a name survives a renumbering that a bare integer
 // would not.
+// The mapping must be TOTAL over kvrpcpb.Op, and it must agree with the Rust driver's
+// `lock_kind` arm for arm. Both clients generate this enum from the same proto, so any
+// operation one of them names and the other renders as a bare `op_N` is a divergence the
+// HARNESS invented — the clients returned the identical protobuf value.
+//
+// Op_Rollback was exactly that: Rust said "rollback", Go said "op_3".
 func lockKind(op kvrpcpb.Op) string {
 	switch op {
 	case kvrpcpb.Op_Put:
@@ -116,13 +122,17 @@ func lockKind(op kvrpcpb.Op) string {
 		return "del"
 	case kvrpcpb.Op_Lock:
 		return "lock"
-	case kvrpcpb.Op_PessimisticLock:
-		return "pessimistic_lock"
+	case kvrpcpb.Op_Rollback:
+		return "rollback"
 	case kvrpcpb.Op_Insert:
 		return "insert"
+	case kvrpcpb.Op_PessimisticLock:
+		return "pessimistic_lock"
 	case kvrpcpb.Op_CheckNotExists:
 		return "check_not_exists"
 	default:
+		// Deliberately still reachable: if the proto grows an operation, BOTH drivers
+		// render it as `op_N` and agree, rather than one of them guessing at a name.
 		return fmt.Sprintf("op_%d", int32(op))
 	}
 }

@@ -47,11 +47,12 @@ rc=0
 # So the runner stamps each artifact with the provenance it ran under, and this reads
 # THAT. Evidence carries the conditions it was gathered under, or it is not evidence.
 HARNESS_REV="$(git rev-parse HEAD)"
-python3 - "$PINS" "$HARNESS_REV" <<'PY' || exit 2
-import glob, json, pathlib, sys, tomllib
+python3 - "$PINS" "$HARNESS_REV" "$LEDGER" <<'PY' || exit 2
+import json, pathlib, sys, tomllib
 
 pins = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
 harness_rev = sys.argv[2]
+ledger = tomllib.loads(pathlib.Path(sys.argv[3]).read_text())
 
 def refuse(why):
     sys.stderr.write(f"""
@@ -67,12 +68,29 @@ pinned world with PARITY_STRICT=1, or iterate locally without settling the ledge
 """)
     sys.exit(2)
 
-results = sorted(glob.glob("results/divergence.*.json"))
+# ONLY the results THIS LEDGER adjudicates.
+#
+# Globbing results/divergence.*.json swept in artifacts from scenarios that have since
+# been renamed or deleted. results/ is gitignored, so those files linger — and being
+# stale they carry an older harness revision, which meant one obsolete artifact would
+# REFUSE every subsequent run, however fresh and valid the real results were. The
+# admissibility rule would have been technically right and practically useless.
+#
+# A ledger entry names its scenario; the scenario names its artifact. Judge those.
+results = []
+for gap in ledger.get("gap", []):
+    name = json.loads(pathlib.Path(gap["scenario"]).read_text())["name"]
+    results.append(f"results/divergence.{name}.json")
+
 if not results:
-    refuse("no results/divergence.*.json — nothing has been run")
+    refuse("the ledger declares no gaps — there is nothing to settle")
 
 for f in results:
-    r = json.loads(pathlib.Path(f).read_text())
+    p_ = pathlib.Path(f)
+    if not p_.exists():
+        refuse(f"{f} is missing — the ledger names this scenario but it has not been run. "
+               "Run `make parity`.")
+    r = json.loads(p_.read_text())
     p = r.get("provenance")
     if not p:
         refuse(f"{f} carries no provenance, so the world it was produced in is unknown. "
@@ -136,6 +154,12 @@ for f in results:
     if cg.get("version") != pins["client_go"]["version"]:
         refuse(f"{f}: produced against client-go {cg.get('version')}, but pins.toml now "
                f"names {pins['client_go']['version']}")
+
+    # The COMPILER is part of the pinned world too. A `go` directive is a minimum, so
+    # go.mod does not imply which toolchain built the oracle.
+    tc = p.get("toolchain", {})
+    if tc.get("go_matches_pin") is not True:
+        refuse(f"{f}: built with Go {tc.get('go')}, but the pin names {tc.get('pinned_go')}")
 
     # The SERVER is half of every behavioural claim. Lock resolution, prewrite residue and
     # conflict shapes are server behaviour as much as client behaviour, so a run against

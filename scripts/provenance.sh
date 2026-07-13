@@ -113,6 +113,21 @@ fi
 # PD's HTTP API is the ground truth (the same source crates/harness uses for region
 # layout). The image DIGEST cannot be recovered from a running cluster, so what is
 # checked is the version it reports — which is what a claim actually depends on.
+# ── The TOOLCHAIN's provenance ───────────────────────────────────────────────
+# A `go` directive is a MINIMUM, not a pin: Go happily builds with any newer release.
+# So recording `go version` while never comparing it to pins.toml means a build done
+# with a different compiler than the pin names gets certified as "the pinned world".
+# The Rust side has never had this hole — rust-toolchain.toml makes cargo FETCH the
+# pinned channel — but nothing was doing the equivalent job for Go.
+GO_TC_PIN=$(pin toolchain.go)
+go_toolchain="absent"
+go_tc_on_pin=false
+if command -v go >/dev/null 2>&1; then
+  # `go version` prints e.g. "go version go1.25.10 linux/amd64".
+  go_toolchain=$(go version 2>/dev/null | awk '{print $3}' | sed 's/^go//')
+  [ "$go_toolchain" = "$GO_TC_PIN" ] && go_tc_on_pin=true
+fi
+
 PD_ONE="${PD_ADDRS:-127.0.0.1:2379}"
 PD_ONE="${PD_ONE%%,*}"
 TIKV_VER_PIN=$(pin cluster.tikv_version)
@@ -181,7 +196,12 @@ cat > "$OUT" <<EOF
     "verified": $cluster_verified,
     "matches_pin": $cluster_on_pin
   },
-  "toolchain": { "rust": "$(rustc -V 2>/dev/null || echo unknown)", "go": "$(go version 2>/dev/null || echo absent)" },
+  "toolchain": {
+    "rust": "$(rustc -V 2>/dev/null || echo unknown)",
+    "go": "$go_toolchain",
+    "pinned_go": "$GO_TC_PIN",
+    "go_matches_pin": $go_tc_on_pin
+  },
   "harness": { "rev": "$(git rev-parse HEAD)", "dirty": $( [ -n "$(git status --porcelain)" ] && echo true || echo false ) }
 }
 EOF
@@ -200,6 +220,27 @@ if [ "$cluster_verified" = true ]; then
   echo "  cluster:     PD $pd_version, TiKV $tikv_versions (asked $PD_ONE)"
 else
   echo "  cluster:     UNVERIFIED — no PD reachable at $PD_ONE"
+fi
+echo "  go:          $go_toolchain (pin $GO_TC_PIN)"
+
+# The Go toolchain gate. A `go` directive is a minimum, so the compiler that actually
+# ran is not implied by go.mod and has to be checked separately.
+if [ "$go_tc_on_pin" = false ]; then
+  if [ "$STRICT" = "1" ]; then
+    cat >&2 <<EOF
+
+REFUSING TO RUN: the Go toolchain is $go_toolchain, but the pin names $GO_TC_PIN.
+
+A \`go\` directive is a MINIMUM, not a pin — Go will happily build with any newer
+release — so the compiler that produced the oracle is not implied by go.mod and must be
+checked on its own. A result built by a different toolchain than the pin names is not a
+result from the pinned world, however identical it looks.
+
+Install Go $GO_TC_PIN, or re-pin toolchain.go (a reviewed change).
+EOF
+    exit 1
+  fi
+  echo "  go:          OFF PIN — $go_toolchain != $GO_TC_PIN (advisory; CI refuses this)" >&2
 fi
 
 # ── The cluster gate ─────────────────────────────────────────────────────────
