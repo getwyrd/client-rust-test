@@ -35,16 +35,20 @@ rc=0
 #
 # This finally keeps the promise scripts/provenance.sh has been making all along:
 # "Downstream, `ledger-check` refuses any result whose provenance says strict:false."
-./scripts/provenance.sh results/provenance.json || exit 2
-
+#
+# THE PROVENANCE IS READ FROM THE RESULTS, NOT RE-STAMPED HERE. That distinction is the
+# whole point and it is easy to get wrong. Re-deriving provenance at adjudication time
+# would describe the world as it is NOW, not the world the evidence was gathered in — so
+# traces produced against a dirty or off-pin client-rust could be left in results/, the
+# checkout restored to the pin, and a strict run of this script would mint fresh,
+# admissible-looking provenance and settle the stale evidence with it. The trace would
+# never have to lie; the adjudicator would do it for them.
+#
+# So the runner stamps each artifact with the provenance it ran under, and this reads
+# THAT. Evidence carries the conditions it was gathered under, or it is not evidence.
 python3 - "$PINS" <<'PY' || exit 2
-import json, pathlib, sys, tomllib
+import glob, json, pathlib, sys, tomllib
 
-prov_path = pathlib.Path("results/provenance.json")
-if not prov_path.exists():
-    sys.exit("REFUSING: no results/provenance.json — run `make provenance` first.")
-
-p = json.loads(prov_path.read_text())
 pins = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
 
 def refuse(why):
@@ -55,39 +59,61 @@ A ledger claim can only ever be settled by a PINNED run. A result produced under
 conditions would look identical to a pinned one and MEAN something different, so it is
 not evidence and must not be published.
 
-Run under PARITY_STRICT=1 against the pinned world, or iterate locally without settling
-the ledger (`make parity` alone reports the diff without claiming to prove anything).
+Run `make ledger` (which re-runs the scenarios under fresh provenance) against the
+pinned world with PARITY_STRICT=1, or iterate locally without settling the ledger
+(`make parity` alone reports the diff without claiming to prove anything).
 """)
     sys.exit(2)
 
-if p.get("schema") != "parity-provenance/v1":
-    refuse("unrecognized provenance schema")
-if p.get("strict") is not True:
-    refuse("provenance says strict:false — this run is not admissible as evidence")
+results = sorted(glob.glob("results/divergence.*.json"))
+if not results:
+    refuse("no results/divergence.*.json — nothing has been run")
 
-cr = p["client_rust"]
-if cr.get("matches_pin") is not True:
-    refuse(f"the crate under test is off-pin (actual {cr.get('rev')}, pinned {cr.get('pinned_rev')})")
-if cr.get("dirty") is not False:
-    refuse("the crate under test is DIRTY — its revision does not describe its contents")
+for f in results:
+    r = json.loads(pathlib.Path(f).read_text())
+    p = r.get("provenance")
+    if not p:
+        refuse(f"{f} carries no provenance, so the world it was produced in is unknown. "
+               "Re-run `make parity` — a result that cannot say what it was gathered "
+               "against is not evidence.")
 
-cg = p["client_go"]
-if cg.get("replaced") is True:
-    refuse("client-go is REPLACED — the oracle is a local tree you can edit, not the pinned module")
-if cg.get("matches_pin") is not True:
-    refuse(f"client-go resolved to {cg.get('version')}, but the pin names {cg.get('pinned_version')}")
+    if p.get("schema") != "parity-provenance/v1":
+        refuse(f"{f}: unrecognized provenance schema")
+    if p.get("strict") is not True:
+        refuse(f"{f}: produced with strict:false — not admissible as evidence")
 
-# The SERVER is half of every behavioural claim. Lock resolution, prewrite residue and
-# conflict shapes are server behaviour as much as client behaviour, so a run against an
-# unidentified or off-pin TiKV certifies nothing — however pinned the two clients were.
-cl = p["cluster"]
-if cl.get("verified") is not True:
-    refuse(f"the cluster at {cl.get('pd_addr')} could not be identified (no PD reachable)")
-if cl.get("matches_pin") is not True:
-    refuse(
-        f"the cluster is PD {cl.get('observed_pd_version')} / TiKV [{cl.get('observed_tikv_versions')}], "
-        f"but the pin names {cl.get('pinned_version')}"
-    )
+    cr = p["client_rust"]
+    if cr.get("matches_pin") is not True:
+        refuse(f"{f}: produced against an off-pin client-rust "
+               f"(actual {cr.get('rev')}, pinned {cr.get('pinned_rev')})")
+    if cr.get("dirty") is not False:
+        refuse(f"{f}: produced against a DIRTY client-rust — its revision does not "
+               "describe its contents")
+    if cr.get("rev") != pins["client_rust"]["rev"]:
+        refuse(f"{f}: produced against client-rust {cr.get('rev')}, but pins.toml now "
+               f"names {pins['client_rust']['rev']} — the pin moved after this result "
+               "was gathered, so it no longer describes the pinned world")
+
+    cg = p["client_go"]
+    if cg.get("replaced") is True:
+        refuse(f"{f}: the oracle was REPLACED — a local tree you can edit, not the pinned module")
+    if cg.get("matches_pin") is not True:
+        refuse(f"{f}: client-go resolved to {cg.get('version')}, but the pin names "
+               f"{cg.get('pinned_version')}")
+    if cg.get("version") != pins["client_go"]["version"]:
+        refuse(f"{f}: produced against client-go {cg.get('version')}, but pins.toml now "
+               f"names {pins['client_go']['version']}")
+
+    # The SERVER is half of every behavioural claim. Lock resolution, prewrite residue and
+    # conflict shapes are server behaviour as much as client behaviour, so a run against
+    # an unidentified or off-pin TiKV certifies nothing — however pinned the clients were.
+    cl = p["cluster"]
+    if cl.get("verified") is not True:
+        refuse(f"{f}: the cluster at {cl.get('pd_addr')} could not be identified (no PD reachable)")
+    if cl.get("matches_pin") is not True:
+        refuse(f"{f}: the cluster was PD {cl.get('observed_pd_version')} / "
+               f"TiKV [{cl.get('observed_tikv_versions')}], but the pin names "
+               f"{cl.get('pinned_version')}")
 PY
 
 # ── 2. THE ORACLE MUST BE THE PINNED ORACLE, AS THE BINARY ITSELF REPORTS IT ─────────

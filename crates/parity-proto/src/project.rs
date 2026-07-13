@@ -213,12 +213,41 @@ fn project_obs(obs: &Observation, prefix: &str, spec: &Spec, out: &mut BTreeMap<
 /// Applied to values too, not just keys: a scenario may store a key as a value (a
 /// dirent pointing at an inode is exactly that shape), and leaving the prefix in
 /// would make it diverge for a reason that has nothing to do with either client.
+///
+/// REDACTION HAPPENS ON BYTES, BEFORE ANY UTF-8 DECISION. That ordering is the whole
+/// point. A binary key is namespaced by prepending the prefix BYTES (`KeyArg::as_key`),
+/// and the result is generally not valid UTF-8 — so a redactor that only handled the
+/// UTF-8 case would fall through to base64-encoding the key *with the run prefix still
+/// in it*. Two runs get different prefixes by construction, so the oracle's and the
+/// subject's otherwise-identical locks would encode differently and diverge for a reason
+/// that is purely an artifact of the harness. Redact first, then choose how to render.
 fn redact_prefix_bytes(raw: &[u8], prefix: &str) -> String {
-    match String::from_utf8(raw.to_vec()) {
-        Ok(s) => s.replace(prefix, PREFIX_TOKEN),
-        // Not utf-8: compare the bytes as base64, opaque and exact.
-        Err(_) => crate::observation::b64_encode(raw),
+    let redacted = replace_bytes(raw, prefix.as_bytes(), PREFIX_TOKEN.as_bytes());
+    match String::from_utf8(redacted.clone()) {
+        Ok(s) => s,
+        // Not utf-8 even after redaction: compare as base64 — opaque, exact, and now
+        // free of the run-specific prefix.
+        Err(_) => crate::observation::b64_encode(&redacted),
     }
+}
+
+/// Byte-level find/replace of every occurrence of `needle`.
+fn replace_bytes(haystack: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return haystack.to_vec();
+    }
+    let mut out = Vec::with_capacity(haystack.len());
+    let mut i = 0;
+    while i < haystack.len() {
+        if i + needle.len() <= haystack.len() && &haystack[i..i + needle.len()] == needle {
+            out.extend_from_slice(with);
+            i += needle.len();
+        } else {
+            out.push(haystack[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Rust's default lock TTL and Go's size-scaled TTL differ by construction, so the
@@ -311,6 +340,7 @@ mod tests {
             schema: TRACE_SCHEMA.to_owned(),
             scenario: "orphan".to_owned(),
             run: "r".to_owned(),
+            provenance: serde_json::Value::Null,
             roles: vec![],
             prefix: prefix.to_owned(),
             steps,
@@ -503,6 +533,59 @@ mod tests {
             &project(&s, &Spec::default())
         )
         .is_empty());
+    }
+
+    #[test]
+    fn a_namespaced_binary_key_is_redacted_at_the_byte_level() {
+        // REGRESSION, and the closing of a loop. `KeyArg::as_key` namespaces a binary key
+        // by prepending the run prefix BYTES, and the result is not valid utf-8. A
+        // redactor that only handled the utf-8 case fell through to base64-encoding the
+        // key WITH THE RUN PREFIX STILL IN IT — so the oracle's and the subject's
+        // otherwise-identical locks encoded differently and diverged for a reason that was
+        // purely an artifact of the harness.
+        //
+        // This is the full round trip: namespace the same binary key into two runs, and
+        // the projection must call them equal.
+        let raw_key = [0xffu8, 0x00];
+        let key_a = crate::KeyArg::B64 {
+            b64: crate::observation::b64_encode(&raw_key),
+        }
+        .as_key("runA/")
+        .bytes();
+        let key_b = crate::KeyArg::B64 {
+            b64: crate::observation::b64_encode(&raw_key),
+        }
+        .as_key("runB/")
+        .bytes();
+        assert_ne!(
+            key_a, key_b,
+            "precondition: the runs must use different keys"
+        );
+
+        let lock = |k: Vec<u8>| LockObs {
+            key: k.into(),
+            primary: b"pri".to_vec().into(),
+            kind: "put".to_owned(),
+            ttl_ms: 3000,
+            txn_start_ts: 1,
+        };
+        let a = trace(
+            "runA/",
+            vec![step("l", Observation::ok().with_locks(vec![lock(key_a)]))],
+        );
+        let b = trace(
+            "runB/",
+            vec![step("l", Observation::ok().with_locks(vec![lock(key_b)]))],
+        );
+
+        let d = diff(
+            &project(&a, &Spec::default()),
+            &project(&b, &Spec::default()),
+        );
+        assert!(
+            d.is_empty(),
+            "the run prefix leaked into a binary key's projection: {d:?}"
+        );
     }
 
     #[test]

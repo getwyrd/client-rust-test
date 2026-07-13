@@ -19,6 +19,16 @@ pub struct Trace {
     pub scenario: String,
     /// Which binding of roles→clients this run was, e.g. "oracle" or "subject".
     pub run: String,
+    /// The world this run was produced in — `results/provenance.json`, verbatim, as it
+    /// stood WHEN THE RUN HAPPENED.
+    ///
+    /// Carried in the artifact rather than looked up later, because provenance
+    /// re-derived at adjudication time describes the wrong moment. Traces produced
+    /// against a dirty or off-pin client-rust could otherwise be left in `results/`, the
+    /// checkout restored to the pin, and a later strict `ledger-check` would stamp fresh,
+    /// admissible-looking provenance and settle stale evidence with it. Evidence must
+    /// carry the conditions it was gathered under, or it is not evidence.
+    pub provenance: serde_json::Value,
     /// role → the driver that played it. The thing a reader most needs to know and
     /// the thing a bare pair of traces would otherwise leave implicit.
     pub roles: Vec<RoleBinding>,
@@ -83,6 +93,7 @@ mod tests {
             schema: TRACE_SCHEMA.to_owned(),
             scenario: "s".to_owned(),
             run: "subject".to_owned(),
+            provenance: serde_json::Value::Null,
             roles: vec![],
             prefix: "p/".to_owned(),
             steps,

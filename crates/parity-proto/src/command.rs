@@ -148,15 +148,32 @@ impl KeyArg {
     /// of one — would be an artifact of the harness rather than a fact about either
     /// client.
     ///
-    /// A `{"b64": …}` key therefore gets the prefix BYTES prepended. Text keys use the
-    /// `{P}` token. Binary keys have no token to substitute, and simply passing them
-    /// through unchanged (as this once did) sent byte-identical keys to both runs — which
-    /// is exactly the collision the prefix exists to prevent, waiting for the first
-    /// scenario to test a `0xFF` boundary or any other key that cannot be written as text.
+    /// THE INVARIANT HOLDS BY CONSTRUCTION, not by inspection. It is impossible to write
+    /// an un-namespaced key:
+    ///
+    ///   - text with `{P}`    — the token is replaced by the prefix.
+    ///   - text without `{P}` — the prefix is PREPENDED.
+    ///   - binary             — the prefix BYTES are prepended.
+    ///
+    /// `{P}` therefore says *where* the prefix goes, never *whether*. Requiring the token
+    /// and trusting scenario authors to remember it would make the isolation guarantee
+    /// depend on nobody ever forgetting a five-character string in a JSON file — and the
+    /// failure would not look like a mistake, it would look like a divergence.
+    ///
+    /// Both escapes mattered and both were once open: a text key without the token, and a
+    /// binary key (which has no token to substitute and used to pass through unchanged).
+    /// Either sent byte-identical keys to both runs, on a SHARED cluster, where the oracle
+    /// deliberately leaves residue — an orphaned lock is the whole of G-0001. Binary keys
+    /// are not exotic, either: a `0xFF` boundary key cannot be written as text, and
+    /// `gate::d4` already tests exactly that boundary.
     pub fn as_key(&self, prefix: &str) -> KeyArg {
         match self {
             KeyArg::Utf8 { s } => KeyArg::Utf8 {
-                s: s.replace("{P}", prefix),
+                s: if s.contains("{P}") {
+                    s.replace("{P}", prefix)
+                } else {
+                    format!("{prefix}{s}")
+                },
             },
             KeyArg::B64 { b64 } => {
                 let mut bytes = prefix.as_bytes().to_vec();
@@ -271,6 +288,45 @@ mod tests {
             s: "{P}z".to_owned(),
         };
         assert_eq!(k.as_key("run7/").bytes(), b"run7/z".to_vec());
+    }
+
+    #[test]
+    fn a_text_key_without_the_token_is_namespaced_anyway() {
+        // REGRESSION. Requiring `{P}` made the isolation guarantee depend on a scenario
+        // author remembering five characters in a JSON file — and forgetting them would
+        // not look like a mistake, it would look like a DIVERGENCE: both runs writing the
+        // same key on a shared cluster, the oracle's residue poisoning the subject.
+        //
+        // `{P}` now says WHERE the prefix goes, never WHETHER.
+        let k = KeyArg::Utf8 {
+            s: "z-secondary".to_owned(),
+        };
+        assert_eq!(k.as_key("run7/").bytes(), b"run7/z-secondary".to_vec());
+        assert_ne!(k.as_key("runA/").bytes(), k.as_key("runB/").bytes());
+    }
+
+    #[test]
+    fn no_key_form_can_escape_its_run_prefix() {
+        // The invariant, stated over EVERY form a key can take: two runs never touch the
+        // same cluster key. If any form escapes, the runs collide and the harness reports
+        // an artifact of itself as a finding.
+        let forms = [
+            KeyArg::Utf8 {
+                s: "{P}explicit".to_owned(),
+            },
+            KeyArg::Utf8 {
+                s: "implicit".to_owned(),
+            },
+            KeyArg::B64 {
+                b64: crate::observation::b64_encode(&[0xff, 0x00]),
+            },
+        ];
+        for k in &forms {
+            let a = k.as_key("runA/").bytes();
+            let b = k.as_key("runB/").bytes();
+            assert_ne!(a, b, "a key escaped its run prefix: {k:?}");
+            assert!(a.starts_with(b"runA/"), "not namespaced: {k:?}");
+        }
     }
 
     #[test]

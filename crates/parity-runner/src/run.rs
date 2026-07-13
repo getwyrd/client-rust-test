@@ -36,6 +36,24 @@ pub struct Binaries {
     pub go: std::path::PathBuf,
 }
 
+/// The world a run happened in, read ONCE before any scenario executes and stamped into
+/// every artifact it produces.
+///
+/// `scripts/provenance.sh` writes this; `make parity` runs it first. The runner refuses
+/// to produce evidence without it, because a trace that does not say what it was gathered
+/// against cannot be adjudicated later — and re-deriving provenance at adjudication time
+/// would describe the wrong moment entirely (see `Trace::provenance`).
+pub fn load_provenance() -> Result<serde_json::Value, String> {
+    let raw = std::fs::read_to_string("results/provenance.json").map_err(|e| {
+        format!(
+            "cannot read results/provenance.json ({e}). Run `make provenance` first: a run \
+             that cannot say what world it was produced in is not evidence."
+        )
+    })?;
+    serde_json::from_str(&raw)
+        .map_err(|e| format!("results/provenance.json is not valid JSON: {e}"))
+}
+
 impl Binaries {
     fn get(&self, driver: &str) -> Result<&Path, String> {
         match driver {
@@ -51,6 +69,7 @@ pub fn execute(
     scenario: &Scenario,
     run: &Run,
     bins: &Binaries,
+    provenance: &serde_json::Value,
 ) -> Result<Result<Trace, Inadmissible>, String> {
     // A per-run key prefix, unique to the nanosecond. MANDATORY: the two runs of a
     // comparison share a cluster, so without distinct prefixes the oracle run's
@@ -148,6 +167,8 @@ pub fn execute(
         schema: TRACE_SCHEMA.to_owned(),
         scenario: scenario.name.clone(),
         run: run.name.clone(),
+        // The world this run happened in, bound to the artifact it produced.
+        provenance: provenance.clone(),
         roles,
         prefix,
         steps,

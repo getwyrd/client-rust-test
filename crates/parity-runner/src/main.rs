@@ -51,9 +51,19 @@ fn main() {
         ),
     };
 
+    // Read the world ONCE, before anything runs, and stamp it into every artifact. A
+    // trace that cannot say what it was produced against cannot be adjudicated later.
+    let provenance = match run::load_provenance() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\nRUNNER ERROR: {e}");
+            std::process::exit(1);
+        }
+    };
+
     let mut failed = false;
     for path in &scenarios {
-        match run_scenario(path, &bins) {
+        match run_scenario(path, &bins, &provenance) {
             Ok(true) => {}
             Ok(false) => failed = true,
             Err(e) => {
@@ -72,7 +82,11 @@ fn main() {
 /// is the ledger's job (`scripts/ledger-check.sh`). Keeping "what happened" separate
 /// from "was that what we predicted" is the whole point: a runner that decided its own
 /// verdict could not be checked against a declared expectation.
-fn run_scenario(path: &std::path::Path, bins: &Binaries) -> Result<bool, String> {
+fn run_scenario(
+    path: &std::path::Path,
+    bins: &Binaries,
+    provenance: &serde_json::Value,
+) -> Result<bool, String> {
     let scenario = Scenario::load(path)?;
     println!("\n═══ {} ═══", scenario.name);
     println!("{}", scenario.doc.trim());
@@ -90,7 +104,7 @@ fn run_scenario(path: &std::path::Path, bins: &Binaries) -> Result<bool, String>
             .collect();
         println!("\n── run `{}` [{}]", run.name, bind.join(" "));
 
-        match run::execute(&scenario, run, bins)? {
+        match run::execute(&scenario, run, bins, provenance)? {
             Ok(trace) => {
                 let file = out_dir.join(format!("{}.{}.json", scenario.name, run.name));
                 std::fs::write(
@@ -140,12 +154,15 @@ fn run_scenario(path: &std::path::Path, bins: &Binaries) -> Result<bool, String>
         }
     }
 
-    // The divergence report is an artifact in its own right: it is what a ledger claim
-    // is checked against, and what an upstream issue quotes.
+    // The divergence report is an artifact in its own right: it is what a ledger claim is
+    // checked against, and what an upstream issue quotes. It carries its OWN provenance,
+    // so `ledger-check` adjudicates the world this result was produced in rather than the
+    // world it happens to be adjudicated in.
     let report = serde_json::json!({
         "schema": "parity-divergence/v1",
         "scenario": scenario.name,
         "gap": scenario.gap,
+        "provenance": provenance,
         "oracle": a,
         "subject": b,
         "divergences": divergences,
