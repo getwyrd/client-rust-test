@@ -104,32 +104,58 @@ fn run_scenario(
             .collect();
         println!("\n── run `{}` [{}]", run.name, bind.join(" "));
 
-        match run::execute(&scenario, run, bins, provenance)? {
-            Ok(trace) => {
-                let file = out_dir.join(format!("{}.{}.json", scenario.name, run.name));
-                std::fs::write(
-                    &file,
-                    serde_json::to_string_pretty(&trace).map_err(|e| e.to_string())?,
-                )
-                .map_err(|e| format!("write {}: {e}", file.display()))?;
-                println!("   {} steps -> {}", trace.steps.len(), file.display());
-                traces.insert(run.name.clone(), trace);
+        // A region error means the CLUSTER moved under us — a split, a merge, a leader
+        // change — not that either client did anything. The run is evidence of nothing,
+        // but it is also nobody's fault, so run it again rather than failing the build on
+        // a transient. `class.rs` has promised this behaviour from the start; this is where
+        // it becomes real.
+        //
+        // Bounded, and loud when the bound is reached: a cluster that keeps moving is a
+        // real problem, and papering over it with unlimited retries would just turn a
+        // broken cluster into a slow one.
+        const MAX_ATTEMPTS: u32 = 3;
+        let mut attempt = 1;
+        let trace = loop {
+            match run::execute(&scenario, run, bins, provenance)? {
+                Ok(trace) => break trace,
+                Err(bad) if bad.transient && attempt < MAX_ATTEMPTS => {
+                    println!(
+                        "   attempt {attempt}/{MAX_ATTEMPTS}: the cluster moved under the run \
+                         ({}) — retrying.",
+                        bad.why
+                    );
+                    attempt += 1;
+                }
+                Err(bad) => {
+                    // INADMISSIBLE — not a divergence. Say so in those words, because the
+                    // difference between "the harness broke" and "the clients differ" is
+                    // the difference between noise and a finding.
+                    let tail = if bad.transient {
+                        format!(" (still failing after {MAX_ATTEMPTS} attempts — the cluster is not settling)")
+                    } else {
+                        String::new()
+                    };
+                    println!(
+                        "\n   INADMISSIBLE — this run is evidence of nothing.\n   {}{tail}\n",
+                        bad.why
+                    );
+                    eprintln!(
+                        "INADMISSIBLE: scenario `{}` run `{}`: {}{tail}",
+                        scenario.name, bad.run, bad.why
+                    );
+                    return Ok(false);
+                }
             }
-            Err(bad) => {
-                // INADMISSIBLE — not a divergence. Say so in those words, because the
-                // difference between "the harness broke" and "the clients differ" is
-                // the difference between noise and a finding.
-                println!(
-                    "\n   INADMISSIBLE — this run is evidence of nothing.\n   {}\n",
-                    bad.why
-                );
-                eprintln!(
-                    "INADMISSIBLE: scenario `{}` run `{}`: {}",
-                    scenario.name, bad.run, bad.why
-                );
-                return Ok(false);
-            }
-        }
+        };
+
+        let file = out_dir.join(format!("{}.{}.json", scenario.name, run.name));
+        std::fs::write(
+            &file,
+            serde_json::to_string_pretty(&trace).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| format!("write {}: {e}", file.display()))?;
+        println!("   {} steps -> {}", trace.steps.len(), file.display());
+        traces.insert(run.name.clone(), trace);
     }
 
     // ── The diff ─────────────────────────────────────────────────────────────

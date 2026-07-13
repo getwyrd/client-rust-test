@@ -206,7 +206,12 @@ rc = 0
 
 for gap in ledger.get("gap", []):
     gid, scen = gap["id"], gap["scenario"]
-    name = pathlib.Path(scen).stem
+    # The runner names its artifacts after the scenario's JSON `name`, NOT its filename.
+    # Deriving the path from the filename stem instead would report a perfectly fresh
+    # result as MISSING the moment the two differ — and the admissibility section above
+    # already reads scen["name"], so the two halves of this script would disagree about
+    # which file they were adjudicating.
+    name = json.loads(pathlib.Path(scen).read_text())["name"]
     dpath = pathlib.Path(f"results/divergence.{name}.json")
 
     print(f"\n═══ {gid} — {gap['title']}")

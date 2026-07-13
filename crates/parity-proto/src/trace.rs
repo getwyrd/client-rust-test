@@ -78,6 +78,20 @@ impl Trace {
             .collect()
     }
 
+    /// Was this run invalidated by the CLUSTER moving under it, rather than by anything
+    /// either client did?
+    ///
+    /// A region error is not client behaviour — it says a region split, merged or changed
+    /// leader mid-run. The run is evidence of nothing, but it is also nobody's fault, so
+    /// the right response is to run it again rather than to fail the build. (Every other
+    /// inadmissible cause — an unmapped error, a driver failure, a failed precondition —
+    /// is a real problem and must stay fatal.)
+    pub fn is_transient(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|s| matches!(s.observation.class, crate::class::Class::RegionError))
+    }
+
     pub fn step(&self, id: &str) -> Option<&Step> {
         self.steps.iter().find(|s| s.id == id)
     }

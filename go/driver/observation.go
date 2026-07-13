@@ -49,6 +49,17 @@ type Observation struct {
 	StartTS  uint64 `json:"start_ts,omitempty"`
 	CommitTS uint64 `json:"commit_ts,omitempty"`
 
+	// How many per-key errors this client surfaced. For client-go the answer is always
+	// ONE: ExtractKeyErr (error/error.go:331) returns a single error even when several
+	// keys failed. client-rust surfaces all of them.
+	//
+	// It must be emitted, not left absent, or a claim opting into `errors.count` would
+	// compare Go's `<absent>` against Rust's "1" and diverge even when both clients
+	// surfaced exactly one error — a false divergence manufactured by an unset field. And
+	// "client-go collapses N errors into 1" is a real, statable parity fact; leaving the
+	// field empty would make it indistinguishable from "we did not look".
+	ErrorCount *int `json:"error_count,omitempty"`
+
 	Proto  map[string]any `json:"proto,omitempty"`
 	Native *Native        `json:"native,omitempty"`
 }
@@ -179,7 +190,12 @@ func classify(err error) *Observation {
 		return notFound()
 	}
 
+	// client-go surfaces exactly one error, however many keys failed: ExtractKeyErr
+	// returns a single error. Stating that explicitly is what lets a claim compare
+	// cardinality against client-rust, which surfaces all of them.
+	one := 1
 	obs := &Observation{
+		ErrorCount: &one,
 		Native: &Native{
 			Lang:    "go",
 			Type:    fmt.Sprintf("%T", errors.Unwrap(err)),

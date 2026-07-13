@@ -29,6 +29,10 @@ use crate::scenario::Scenario;
 pub struct Inadmissible {
     pub run: String,
     pub why: String,
+    /// The CLUSTER moved under the run (a region split, merge or leader change), rather
+    /// than anything either client did. Nobody's fault, so it is worth another attempt —
+    /// see `Trace::is_transient`. Every other cause stays fatal.
+    pub transient: bool,
 }
 
 pub struct Binaries {
@@ -151,6 +155,8 @@ pub fn execute(
                 return Ok(Err(Inadmissible {
                     run: run.name.clone(),
                     why: format!("step `{}` precondition failed: {why}", step.id),
+                    // A setup that did not hold is a REAL problem, not a flaky cluster.
+                    transient: false,
                 }));
             }
         }
@@ -182,6 +188,7 @@ pub fn execute(
         return Ok(Err(Inadmissible {
             run: run.name.clone(),
             why: bad.join("; "),
+            transient: trace.is_transient(),
         }));
     }
 
