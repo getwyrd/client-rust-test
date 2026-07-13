@@ -52,7 +52,7 @@ use crate::trace::Trace;
 ///
 /// So an unknown path is now a hard error at load time, and adding one means adding it
 /// here and teaching `project_obs` to emit it.
-pub const OPT_IN_PATHS: &[&str] = &["native.type", "proto"];
+pub const OPT_IN_PATHS: &[&str] = &["native.type", "proto", "errors.count"];
 
 /// What a comparison looks at, beyond the defaults.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -185,6 +185,17 @@ fn project_obs(obs: &Observation, prefix: &str, spec: &Spec, out: &mut BTreeMap<
                     obs.proto.as_ref().map_or("<absent>".to_owned(), |p| {
                         serde_json::to_string(p).unwrap_or_default()
                     }),
+                );
+            }
+            // How many per-key errors the client surfaced. Opt-in, because client-go's
+            // ExtractKeyErr returns ONE error where client-rust returns all of them —
+            // comparing by default would flag every multi-key error as divergent for a
+            // calling-convention reason rather than a TiKV one.
+            "errors.count" => {
+                out.insert(
+                    "errors.count".to_owned(),
+                    obs.error_count
+                        .map_or("<absent>".to_owned(), |n| n.to_string()),
                 );
             }
             other => {

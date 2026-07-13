@@ -38,7 +38,26 @@ pub fn classify(err: &Error) -> Observation {
     if let Some(p) = proto {
         obs = obs.with_proto(p);
     }
+    // CARDINALITY SURVIVES THE COLLAPSE. A homogeneous multi-key error maps to the single
+    // class its members agree on — it must, or Rust's `MultipleKeyErrors([conflict])`
+    // would not compare against Go's lone `ErrWriteConflict`. But collapsing alone would
+    // make ONE conflict and THREE conflicts project identically, so a client silently
+    // dropping or duplicating per-key errors would be invisible — flatly contradicting the
+    // rule this file states two paragraphs up. The count is kept, and a claim can compare
+    // it (`errors.count`).
+    if let Some(n) = error_count(err) {
+        obs = obs.with_error_count(n);
+    }
     obs
+}
+
+/// How many per-key errors the client surfaced, if it surfaced a set of them.
+fn error_count(err: &Error) -> Option<usize> {
+    match err {
+        Error::MultipleKeyErrors(errs) | Error::ExtractedErrors(errs) => Some(errs.len()),
+        Error::PessimisticLockError { inner, .. } => error_count(inner),
+        _ => None,
+    }
 }
 
 /// The class, and the kvproto message it came from (when there is one).
@@ -348,6 +367,29 @@ mod tests {
 
         assert_eq!(multi.native.unwrap().r#type, "MultipleKeyErrors");
         assert_eq!(extracted.native.unwrap().r#type, "ExtractedErrors");
+    }
+
+    #[test]
+    fn a_homogeneous_multi_key_error_keeps_its_cardinality() {
+        // REGRESSION, and it contradicted this file's own stated rule. Collapsing a
+        // homogeneous multi-key error to its single class is REQUIRED for cross-client
+        // comparability (Rust's MultipleKeyErrors([conflict]) has to match Go's lone
+        // ErrWriteConflict) — but collapsing alone made ONE conflict and THREE conflicts
+        // project identically, so a client dropping or duplicating per-key errors was
+        // invisible. The count survives.
+        let conflict = || key_error(|ke| ke.conflict = Some(Default::default()));
+
+        let one = classify(&Error::MultipleKeyErrors(vec![conflict()]));
+        let three = classify(&Error::MultipleKeyErrors(vec![
+            conflict(),
+            conflict(),
+            conflict(),
+        ]));
+
+        assert_eq!(one.class, Class::WriteConflict);
+        assert_eq!(three.class, Class::WriteConflict, "same fact, same class");
+        assert_eq!(one.error_count, Some(1));
+        assert_eq!(three.error_count, Some(3), "cardinality must survive");
     }
 
     #[test]

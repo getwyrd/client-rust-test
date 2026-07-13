@@ -55,6 +55,23 @@ pub struct Observation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_ts: Option<u64>,
 
+    /// How many per-key errors the client actually surfaced, when it surfaced several.
+    ///
+    /// A multi-key error whose members all report the SAME fact collapses to that one
+    /// class — it has to, or Rust's `MultipleKeyErrors([conflict])` would not compare
+    /// against Go's single `ErrWriteConflict`, and every one-key conflict would diverge on
+    /// idiom alone. But collapsing throws away the CARDINALITY, so one conflict and three
+    /// conflicts would project identically and a client silently dropping or duplicating
+    /// per-key errors would be invisible.
+    ///
+    /// So the count is kept here. It is an OPT-IN projection path (`errors.count`), not a
+    /// default one, for the same reason `native.type` is: client-go's `ExtractKeyErr`
+    /// surfaces ONE error where client-rust surfaces all of them, so comparing counts by
+    /// default would flag every multi-key error as divergent for a reason that is about
+    /// calling convention rather than about TiKV. A claim that cares can ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_count: Option<usize>,
+
     /// L1 — the `kvrpcpb` message, as canonical JSON, when the error carried one.
     ///
     /// Presence and message type are compared by default; field values are opt-in.
@@ -80,9 +97,16 @@ impl Observation {
             locks: Vec::new(),
             start_ts: None,
             commit_ts: None,
+            error_count: None,
             proto: None,
             native: None,
         }
+    }
+
+    /// How many per-key errors the client surfaced (see [`Observation::error_count`]).
+    pub fn with_error_count(mut self, n: usize) -> Self {
+        self.error_count = Some(n);
+        self
     }
 
     pub fn ok() -> Self {

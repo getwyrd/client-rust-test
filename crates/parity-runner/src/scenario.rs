@@ -151,12 +151,17 @@ impl Scenario {
                 return Err(format!("duplicate run name `{}`", run.name));
             }
         }
-        // Distinct NAMES are not enough. Two runs can be named differently and still bind
-        // every role to the same driver — comparing, say, all-Go against all-Go. The diff
-        // is then empty for a reason that has nothing to do with either client, and an
-        // `expect = "agrees"` claim passes without client-rust ever being exercised. This
-        // is the self-comparison hole wearing a different name, so it is closed here too:
-        // the two compared runs must actually CONTRAST something.
+        // Distinct NAMES are not enough, and neither are distinct BINDING MAPS.
+        //
+        // Two runs can be named differently and still route every command through the same
+        // driver — comparing all-Go against all-Go. The diff is then empty for a reason
+        // that has nothing to do with either client, and an `expect = "agrees"` claim
+        // passes without client-rust ever being exercised.
+        //
+        // And a whole-map comparison is not enough either, because the maps can differ on a
+        // role that never executes anything: bind an unused `ghost` role to rust, run every
+        // real step through go, and the maps differ while the comparison still contrasts
+        // nothing. So contrast is judged over the roles that ACTUALLY EXECUTE STEPS.
         //
         // The runs are looked up (not `expect`ed) because `compare` naming an undefined
         // run is a scenario error, and it must be REPORTED, not panicked on.
@@ -169,12 +174,25 @@ impl Scenario {
         };
         let bind_a = &find(a)?.bind;
         let bind_b = &find(b)?.bind;
-        if bind_a == bind_b {
+
+        // Roles that drive at least one command. `sleep` is the runner's own op and has no
+        // role, so it can never make a role active.
+        let active: std::collections::BTreeSet<&String> = self
+            .steps
+            .iter()
+            .filter(|s| s.cmd.get("op").and_then(|o| o.as_str()) != Some("sleep"))
+            .filter_map(|s| s.role.as_ref())
+            .collect();
+
+        if active.is_empty() {
+            return Err("no step executes a command, so the scenario observes nothing".to_owned());
+        }
+        if active.iter().all(|r| bind_a.get(*r) == bind_b.get(*r)) {
             return Err(format!(
-                "runs `{a}` and `{b}` bind every role to the same driver ({bind_a:?}), so \
-                 comparing them contrasts nothing. The diff would be empty for a reason \
-                 unrelated to either client, and an `agrees` claim would pass without the \
-                 subject ever being exercised."
+                "runs `{a}` and `{b}` route every EXECUTING role ({active:?}) to the same \
+                 driver, so comparing them contrasts nothing. The diff would be empty for a \
+                 reason unrelated to either client, and an `agrees` claim would pass without \
+                 the subject ever being exercised."
             ));
         }
         // An unknown opt-in path must fail HERE, loudly, before a single command runs.
@@ -229,12 +247,37 @@ impl Scenario {
                     arg.validate()
                         .map_err(|e| format!("step `{}`: {e}", step.id))?;
                 }
+                // `batch_size: 0` deserializes happily but means different things to the
+                // two drivers — the Rust driver cannot page with it (driver_error, so the
+                // run is inadmissible) while the Go driver ignores the hint entirely and
+                // scans fine. The same command must not have asymmetric HARNESS semantics:
+                // that is a divergence manufactured by us, not observed in a client.
+                if let parity_proto::Command::ScanLocks { batch_size, .. } = &cmd {
+                    if *batch_size == 0 {
+                        return Err(format!(
+                            "step `{}`: scan_locks needs batch_size > 0. It is a paging hint, \
+                             and 0 can make no progress.",
+                            step.id
+                        ));
+                    }
+                }
             }
         }
         for run in &self.runs {
             for role in &self.roles {
                 if !run.bind.contains_key(role) {
                     return Err(format!("run `{}` does not bind role `{role}`", run.name));
+                }
+            }
+            // A binding for a role the scenario never declares executes nothing, but it
+            // does make the binding MAPS differ — which is exactly how a vacuous
+            // comparison could once sneak past the contrast check.
+            for bound in run.bind.keys() {
+                if !self.roles.contains(bound) {
+                    return Err(format!(
+                        "run `{}` binds `{bound}`, which is not a declared role",
+                        run.name
+                    ));
                 }
             }
         }
@@ -296,6 +339,49 @@ mod tests {
             runs,
         );
         assert!(parse(&s).unwrap_err().contains("does not bind role"));
+    }
+
+    #[test]
+    fn contrast_is_judged_over_roles_that_actually_execute() {
+        // Two runs whose binding MAPS differ, but only on a role that never executes
+        // anything: every real command goes through go in both runs, so the diff is empty
+        // by construction and an `agrees` claim would pass without rust being exercised.
+        let runs = r#"[{"name":"oracle","bind":{"r":"go","ghost":"go"}},
+                       {"name":"subject","bind":{"r":"go","ghost":"rust"}}]"#;
+        let s = format!(
+            r#"{{"schema":"parity-scenario/v1","name":"n","doc":"d",
+                 "roles":["r","ghost"],"runs":{runs},"compare":["oracle","subject"],
+                 "steps":[{{"id":"a","role":"r","cmd":{{"op":"open_client","name":"c"}}}}]}}"#
+        );
+        let err = parse(&s).unwrap_err();
+        assert!(err.contains("contrasts nothing"), "{err}");
+    }
+
+    #[test]
+    fn a_binding_for_an_undeclared_role_is_rejected() {
+        let runs = r#"[{"name":"oracle","bind":{"r":"go","stray":"rust"}},
+                       {"name":"subject","bind":{"r":"rust"}}]"#;
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
+            runs,
+        );
+        assert!(parse(&s).unwrap_err().contains("not a declared role"));
+    }
+
+    #[test]
+    fn a_zero_scan_batch_size_is_rejected() {
+        // 0 means different things to the two drivers (rust: cannot page; go: ignores it),
+        // so the same command would have asymmetric HARNESS semantics — a divergence
+        // manufactured by us rather than observed in a client.
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"scan_locks","client":"c","start":{"s":"a"},"end":{"s":"z"},"batch_size":0}}]"#,
+            RUNS,
+        );
+        assert!(parse(&s).unwrap_err().contains("batch_size > 0"));
     }
 
     #[test]
