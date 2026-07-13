@@ -1,8 +1,8 @@
 # Regression (#519): orphaned secondary lock is never resolved — reads fail with `TxnNotFound` forever
 
-Draft upstream issue for tikv/client-rust. Status: verified locally, causal
-chain adversarially reviewed and confirmed, fix validated twice independently
-(see Fix validation). Ready to file.
+Filed upstream as tikv/client-rust#543; fix in flight as PR #544. Status: verified
+locally, causal chain adversarially reviewed and confirmed, fix validated twice
+independently (see Fix validation).
 
 ## Summary
 

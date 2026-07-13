@@ -116,6 +116,7 @@ wyrd/
     ├── cluster/            # throwaway single-node PD + TiKV (digest-pinned)
     ├── scripts/            # pins, provenance, the verdicts
     ├── findings/           # the harness's output: write-ups, repros, evidence
+    ├── docs/               # the roadmap + the client rules (MUST/SHOULD/CAN)
     ├── ledger.toml         # every gap, with a declared expectation
     └── pins.toml           # what is under test — the single source of truth
 ```
@@ -194,7 +195,7 @@ genuinely span Raft regions — the property M4 depends on.
 does not work around any of them; each is surfaced by a test and belongs
 fixed in client-rust.
 
-1. **Bug (regression in #519) — an orphaned lock is never resolved; filing-ready**
+1. **Bug (regression in #519) — an orphaned lock is never resolved; filed as #543, fix PR #544 in flight**
    (`d6`, currently **red** on `e53837d`; ledger **`G-0001`**, XDIVERGE;
    [findings/](findings/txn-not-found-lock-resolution.md)). **Now also stated against
    the oracle**: `scenarios/orphaned-lock-resolution.json` manufactures one orphan with
@@ -227,7 +228,7 @@ fixed in client-rust.
    this evaluation harness.)
 2. **Failed commits leave prewrite locks — one bug + one gap** (adversarially
    reviewed, confirmed against TiKV server source, **empirically reproduced**
-   by `failpoint_gate.rs::d7` / `make failpoint-test`; filing-ready in
+   by `failpoint_gate.rs::d7` / `make failpoint-test`; filed as #545, fix PR #547 in flight; write-up in
    [findings/pessimistic-rollback-leaves-prewrite-locks.md](findings/pessimistic-rollback-leaves-prewrite-locks.md)).
    Two halves:
    - **Bug (pessimistic-specific):** after a failed 2PC commit, even the
