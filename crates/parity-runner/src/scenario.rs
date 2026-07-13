@@ -207,7 +207,22 @@ impl Scenario {
             // base64 argument is worse than that — it decodes to EMPTY bytes, both
             // drivers agree on the empty key, and the ledger certifies a scenario nobody
             // wrote. (`sleep` is the runner's own op and is not a driver command.)
-            if step.cmd.get("op").and_then(|o| o.as_str()) != Some("sleep") {
+            let op = step.cmd.get("op").and_then(|o| o.as_str());
+
+            // `hello` is the RUNNER's handshake, not a scenario step: the driver answers
+            // it with a `hello`, not an observation, so a step using it would deserialize
+            // fine, pass every static check, and then abort the run at execution time
+            // ("driver returned no observation"). A statically valid scenario must not be
+            // able to fail for a protocol reason it cannot see.
+            if op == Some("hello") {
+                return Err(format!(
+                    "step `{}`: `hello` is the runner's handshake, not a scenario step. \
+                     It returns no observation, so the run would abort.",
+                    step.id
+                ));
+            }
+
+            if op != Some("sleep") {
                 let cmd: parity_proto::Command = serde_json::from_value(step.cmd.clone())
                     .map_err(|e| format!("step `{}`: bad command: {e}", step.id))?;
                 for arg in cmd.args() {
@@ -252,7 +267,7 @@ mod tests {
         let s = scenario_json(
             r#"["oracle","subject"]"#,
             r#"["r"]"#,
-            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
             RUNS,
         );
         assert!(parse(&s).is_ok());
@@ -265,7 +280,7 @@ mod tests {
         let s = scenario_json(
             r#"["oracle","subject"]"#,
             r#"["r"]"#,
-            r#"[{"id":"a","role":"ghost","cmd":{"op":"hello"}}]"#,
+            r#"[{"id":"a","role":"ghost","cmd":{"op":"open_client","name":"c"}}]"#,
             RUNS,
         );
         assert!(parse(&s).unwrap_err().contains("ghost"));
@@ -277,10 +292,25 @@ mod tests {
         let s = scenario_json(
             r#"["oracle","subject"]"#,
             r#"["r"]"#,
-            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
             runs,
         );
         assert!(parse(&s).unwrap_err().contains("does not bind role"));
+    }
+
+    #[test]
+    fn a_hello_step_is_rejected() {
+        // `hello` is the runner's handshake. It deserializes as a valid Command and passed
+        // every static check, but the driver answers it with a `hello` rather than an
+        // observation — so the run aborted at execution time. A statically valid scenario
+        // must not be able to fail for a protocol reason its author cannot see.
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            RUNS,
+        );
+        assert!(parse(&s).unwrap_err().contains("handshake"));
     }
 
     #[test]
@@ -289,7 +319,7 @@ mod tests {
         let s = scenario_json(
             r#"["oracle","ghost"]"#,
             r#"["r"]"#,
-            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
             RUNS,
         );
         let err = parse(&s).unwrap_err();
@@ -322,7 +352,7 @@ mod tests {
         let s = scenario_json(
             r#"["oracle","subject"]"#,
             r#"["r"]"#,
-            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
             runs,
         );
         let err = parse(&s).unwrap_err();
@@ -337,7 +367,7 @@ mod tests {
         let s = scenario_json(
             r#"["oracle","oracle"]"#,
             r#"["r"]"#,
-            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
             RUNS,
         );
         assert!(parse(&s).unwrap_err().contains("twice"));
@@ -349,7 +379,7 @@ mod tests {
         let s = scenario_json(
             r#"["oracle","subject"]"#,
             r#"["r"]"#,
-            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
             runs,
         );
         assert!(parse(&s).is_err());
@@ -361,7 +391,7 @@ mod tests {
         let s = scenario_json(
             r#"["oracle","subject"]"#,
             r#"["r"]"#,
-            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}},{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}},{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
             RUNS,
         );
         assert!(parse(&s).unwrap_err().contains("duplicate step id"));

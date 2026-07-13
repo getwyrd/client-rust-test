@@ -238,7 +238,29 @@ pub fn b64_encode(input: &[u8]) -> String {
     out
 }
 
+/// STRICT base64. Anything that is not canonical is rejected.
+///
+/// The lenient version of this accepted `"A"` (a lone sextet), `"AA=A"` (padding in the
+/// middle) and any trailing non-zero residual bits, quietly returning empty or truncated
+/// bytes. That is not a cosmetic flaw: `KeyArg::validate` would then wave the scenario
+/// through, both drivers would agree on a key or value the author never wrote, the diff
+/// would be clean, and the ledger would certify a test that never happened. A typo in a
+/// scenario has to be loud.
+///
+/// Validation is by ROUND TRIP, which is the cheapest way to be exactly right: canonical
+/// base64 has precisely one encoding for any byte string, so if re-encoding the decoded
+/// bytes does not reproduce the input character for character, the input was not
+/// canonical. That covers quartet length, padding position, padding count and residual
+/// bits in one check, with no separate rules to get subtly wrong.
 pub fn b64_decode(input: &str) -> Option<Vec<u8>> {
+    let decoded = b64_decode_permissive(input)?;
+    if b64_encode(&decoded) != input {
+        return None;
+    }
+    Some(decoded)
+}
+
+fn b64_decode_permissive(input: &str) -> Option<Vec<u8>> {
     let mut buf = 0u32;
     let mut bits = 0u32;
     let mut out = Vec::new();
@@ -260,6 +282,31 @@ pub fn b64_decode(input: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_base64_is_rejected_rather_than_silently_truncated() {
+        // REGRESSION. Each of these once decoded to Some(empty-or-truncated) bytes, which
+        // meant a scenario typo became a key or value nobody wrote — both drivers agreeing
+        // on it, the diff clean, and the ledger certifying a test that never ran.
+        for bad in [
+            "A",     // a lone sextet: not a whole byte
+            "AA=A",  // padding in the middle
+            "AAAA=", // length not a multiple of 4
+            "AB",    // unpadded
+            "!!!!",  // outside the alphabet
+            "AB==",  // non-zero residual bits (canonical is "AA==")
+        ] {
+            assert_eq!(b64_decode(bad), None, "`{bad}` must be rejected");
+        }
+    }
+
+    #[test]
+    fn canonical_base64_still_decodes() {
+        for good in ["", "AA==", "AAA=", "AAAA", "/w=="] {
+            assert!(b64_decode(good).is_some(), "`{good}` must decode");
+        }
+        assert_eq!(b64_decode("/w==").unwrap(), vec![0xff]);
+    }
 
     #[test]
     fn base64_round_trips_arbitrary_bytes() {

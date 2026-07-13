@@ -46,10 +46,12 @@ rc=0
 #
 # So the runner stamps each artifact with the provenance it ran under, and this reads
 # THAT. Evidence carries the conditions it was gathered under, or it is not evidence.
-python3 - "$PINS" <<'PY' || exit 2
+HARNESS_REV="$(git rev-parse HEAD)"
+python3 - "$PINS" "$HARNESS_REV" <<'PY' || exit 2
 import glob, json, pathlib, sys, tomllib
 
 pins = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
+harness_rev = sys.argv[2]
 
 def refuse(why):
     sys.stderr.write(f"""
@@ -103,6 +105,15 @@ for f in results:
                "instrument: a modified runner, projection or scenario can change — or "
                "manufacture — the very divergence being adjudicated. Commit the harness, "
                "then re-run `make ledger`.")
+    # CLEAN IS NOT ENOUGH: it must be THIS harness. `results/` is gitignored, so artifacts
+    # survive a checkout — and an OLD, perfectly clean runner/projection/scenario could
+    # then be adjudicated against TODAY's ledger. The instrument that produced the evidence
+    # and the instrument now judging it must be the same one, or the pinning means nothing.
+    if h.get("rev") != harness_rev:
+        refuse(f"{f}: produced by harness {h.get('rev')}, but this is {harness_rev}. "
+               "results/ is gitignored and survives a checkout, so a stale artifact can "
+               "outlive the code that made it. Re-run `make ledger` to regenerate the "
+               "evidence with the harness that is adjudicating it.")
 
     cr = p["client_rust"]
     if cr.get("matches_pin") is not True:
