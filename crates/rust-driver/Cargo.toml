@@ -1,0 +1,31 @@
+# The client-rust parity driver: THE SUBJECT.
+#
+# NOTE WHAT IS ABSENT: any `fail` / `failpoints` feature. This binary's entire job is
+# to observe an UNMODIFIED client. Compiled-in failpoints are inert until configured,
+# so linking them would be contamination rather than a live bug — which is exactly the
+# kind of thing that quietly makes a result untrustworthy months later, when nobody
+# remembers why. See crates/wyrd-gate/Cargo.toml, where the feature is opt-in for the
+# same reason.
+[package]
+name = "rust-driver"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Drives tikv-client (the SUBJECT) through the parity command protocol."
+
+[[bin]]
+name = "parity-driver-rust"
+path = "src/main.rs"
+
+[dependencies]
+harness.workspace = true
+parity-proto.workspace = true
+tikv-client.workspace = true
+
+env_logger.workspace = true
+libc = "0.2"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio.workspace = true

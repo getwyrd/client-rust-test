@@ -1,0 +1,69 @@
+{
+  "schema": "parity-scenario/v1",
+  "name": "orphaned-lock-resolution",
+  "gap": "G-0001",
+  "doc": "An orphaned lock: a lock on a SECONDARY key whose PRIMARY was never written.\nThe primary carries no lock and no write record, so a reader cannot learn the\ntransaction's fate from it and MUST escalate to rollback_if_not_exist once the TTL\nexpires.\n\nclient-go does: the read succeeds, and its async resolver then clears the lock.\nclient-rust (#543) does not. check_txn_status matches Error::ExtractedErrors, but the\nplan shape (retry_multi_region -> merge -> extract_error) can only ever deliver the key\nerror as Error::MultipleKeyErrors, so the rollback_if_not_exist heal path is DEAD CODE.\nThe read fails, the lock stays, and the key is left unreadable AND unwritable forever --\nunchanged by TTL expiry. Note the divergence on `native.type` below: MultipleKeyErrors\nvs client-go's untyped error IS the bug, and it is only visible because the observation\nkeeps each client's own taxonomy alongside the canonical class.\n\nBOTH RUNS SHARE ONE SETUP: client-go manufactures the orphan in both, using\nCommitterProbe (exported from a NON-test file). Only the READER changes. So any\ndivergence below is attributable to the reader alone -- a strictly stronger claim than\ngate::d6 can make, since d6 must manufacture the orphan through the public API with a\nregion split and a racing transaction, and therefore cannot tell 'I failed to BUILD the\norphan' apart from 'the client failed to RESOLVE it'.",
+
+  "roles": ["orphaner", "reader"],
+
+  "runs": [
+    { "name": "oracle",  "bind": { "orphaner": "go", "reader": "go"   } },
+    { "name": "subject", "bind": { "orphaner": "go", "reader": "rust" } }
+  ],
+  "compare": ["oracle", "subject"],
+
+  "also_compare": ["native.type"],
+
+  "steps": [
+    { "id": "orphaner-open", "role": "orphaner",
+      "cmd": { "op": "open_client", "name": "c" } },
+
+    { "id": "orphaner-begin", "role": "orphaner",
+      "cmd": { "op": "begin", "session": "t", "client": "c", "mode": "optimistic" } },
+
+    { "id": "orphaner-stage", "role": "orphaner",
+      "why": "Buffer the secondary. The committer prewrites from the txn's membuffer.",
+      "cmd": { "op": "put", "session": "t",
+               "key":   { "s": "{P}z-secondary" },
+               "value": { "s": "orphan-value" } } },
+
+    { "id": "orphaner-prewrite", "role": "orphaner",
+      "why": "Prewrite ONLY the secondary, naming a primary we never write. That is the orphan.",
+      "cmd": { "op": "prewrite_only", "session": "t",
+               "primary": { "s": "{P}a-primary" },
+               "keys": [ { "s": "{P}z-secondary" } ] } },
+
+    { "id": "orphaner-crash", "role": "orphaner",
+      "why": "Drop without commit or rollback. The lock stays behind -- the whole point.",
+      "cmd": { "op": "abandon", "session": "t" } },
+
+    { "id": "reader-open", "role": "reader",
+      "cmd": { "op": "open_client", "name": "c" } },
+
+    { "id": "reader-confirms-orphan", "role": "reader",
+      "why": "PRECONDITION, not a parity claim: the reader must SEE the orphan through its own client before we can ask it to resolve one. If this fails the run is inadmissible, not divergent.",
+      "assert": { "lock_count": 1 },
+      "cmd": { "op": "scan_locks", "client": "c",
+               "start": { "s": "{P}" },
+               "end":   { "s": "{P}~" },
+               "limit": 16 } },
+
+    { "id": "ttl-expiry", "why": "The orphan's lock TTL is 1000ms (set by the Go orphaner). Wait it out with margin, so resolution is unambiguously the reader's job and no doubt remains that the txn might still be live.",
+      "cmd": { "op": "sleep", "ms": 4000 } },
+
+    { "id": "reader-final-read", "role": "reader",
+      "why": "THE PARITY CLAIM. After TTL expiry the read must SUCCEED: the client must resolve the orphan itself. Note the key is correctly ABSENT afterwards -- the orphaning txn never committed, so resolution means rolling it back, and `not_found` is the right answer. What must NOT happen is an ERROR. The harness carries no janitor: resolving an orphaned lock is the CLIENT's responsibility.",
+      "cmd": { "op": "snapshot_get", "client": "c",
+               "key": { "s": "{P}z-secondary" } } },
+
+    { "id": "settle", "why": "client-go resolves the orphan ASYNCHRONOUSLY -- its read returns before the resolver has removed the lock (it has a dedicated async-resolve pool). Measured: the lock is still present immediately after the read, and gone ~3s later. Without this settle window the next step races that pool and reports the oracle as having left the lock behind, understating what client-go actually does.\n\nThe failure mode is deliberately the safe one: if this window is ever too short, BOTH sides show the lock, the diff shows no divergence, and ledger-check fires XCONVERGE -- a LOUD failure. It can never quietly produce a wrong answer.",
+      "cmd": { "op": "sleep", "ms": 6000 } },
+
+    { "id": "reader-locks-after", "role": "reader",
+      "why": "Did the reader actually CLEAR the lock, or merely read past it? A client that reads but leaves the residue has not resolved anything -- the key would still be unwritable. This is the stronger half of the claim.",
+      "cmd": { "op": "scan_locks", "client": "c",
+               "start": { "s": "{P}" },
+               "end":   { "s": "{P}~" },
+               "limit": 16 } }
+  ]
+}

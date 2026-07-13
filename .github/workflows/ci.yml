@@ -32,6 +32,7 @@ jobs:
     outputs:
       client_rust_rev: ${{ steps.p.outputs.client_rust_rev }}
       rust_toolchain:  ${{ steps.p.outputs.rust_toolchain }}
+      go_toolchain:    ${{ steps.p.outputs.go_toolchain }}
     steps:
       - uses: actions/checkout@v4
       # ubuntu-latest ships Python >= 3.11, so tomllib is stdlib. Nothing to install.
@@ -42,6 +43,7 @@ jobs:
           p = tomllib.loads(pathlib.Path("pins.toml").read_text())
           print(f"client_rust_rev={p['client_rust']['rev']}")
           print(f"rust_toolchain={p['toolchain']['rust']}")
+          print(f"go_toolchain={p['toolchain']['go']}")
           PY
 
   # ───────────────────────────────────────────────────────────────────────────
@@ -76,7 +78,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: client-rust-test }
 
+      # The Go side. Version comes from pins.toml, like everything else — a revision
+      # appears in exactly one place in this repo.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ needs.pins.outputs.go_toolchain }}
+          cache-dependency-path: client-rust-test/go/go.sum
+
       # rust-toolchain.toml pins the channel; check-pins.sh asserts it matches.
+      # `check` now also runs go vet / go mod verify / gofmt (see the Makefile).
       - run: make check
 
   # ───────────────────────────────────────────────────────────────────────────
@@ -107,6 +117,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: client-rust-test }
 
+      # The ORACLE's toolchain. Pinned like everything else.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ needs.pins.outputs.go_toolchain }}
+          cache-dependency-path: client-rust-test/go/go.sum
+
       # Digest-pinned images from pins.toml + wait for PD and a TiKV store Up.
       - name: cluster up
         run: make cluster-up
@@ -126,6 +142,16 @@ jobs:
       # `make gate` used to skip entirely.
       - name: verdict (expect green + d6/d7 XFAIL)
         run: make verdict
+
+      # THE PARITY LEDGER. Drives client-rust and client-go through the same scenarios
+      # and checks the divergences against their DECLARED expectations.
+      #
+      # Like `verdict`, a plain pass/fail is meaningless here: G-0001 is SUPPOSED to
+      # diverge at the pinned revision. What this asserts is that it diverges in exactly
+      # the predicted way. An unexpected CONVERGENCE fails the job on purpose — it means
+      # the gap closed upstream and the pin, the README and the ledger are all stale.
+      - name: ledger (expect G-0001 XDIVERGE)
+        run: make ledger
 
       - name: cluster logs
         if: failure()

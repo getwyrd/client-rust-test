@@ -15,6 +15,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 PINS="${PINS:-pins.toml}"
 CLIENT_RUST="${CLIENT_RUST:-../client-rust}"
+CLIENT_GO="${CLIENT_GO:-../client-go}"
 fail=0
 
 note() { printf '  %s\n' "$*"; }
@@ -35,6 +36,7 @@ RUST_REV=$(pin client_rust.rev)
 RUST_UPSTREAM=$(pin client_rust.upstream)
 GO_MOD=$(pin client_go.module)
 GO_VER=$(pin client_go.version)
+GO_REV=$(pin client_go.rev)
 RUST_TC=$(pin toolchain.rust)
 GO_TC=$(pin toolchain.go)
 note "client_rust.rev  = $RUST_REV"
@@ -51,13 +53,56 @@ print(tomllib.loads(pathlib.Path('rust-toolchain.toml').read_text())['toolchain'
 fi
 
 # ── 2. go.mod must require the pinned client-go, exactly ────────────────────
-# Only once the Go module exists (it arrives with the Go runner, Phase 2).
 if [ -f go/go.mod ]; then
   have=$(awk -v m="$GO_MOD" '$1==m {print $2; exit}' go/go.mod || true)
   [ "$have" = "$GO_VER" ] \
     || bad "go/go.mod requires $GO_MOD '$have' != pins client_go.version '$GO_VER'"
+
+  # The go directive must match the pinned toolchain, for the same reason
+  # rust-toolchain.toml must: a result produced by a different compiler than the
+  # one the pin names is not the result the pin describes.
+  have_go=$(awk '$1=="go" {print $2; exit}' go/go.mod || true)
+  [ "$have_go" = "$GO_TC" ] \
+    || bad "go/go.mod 'go $have_go' != pins toolchain.go '$GO_TC'"
+
+  # THE ORACLE MUST NOT BE REPLACEABLE. pins.toml puts it plainly: "an oracle you
+  # can accidentally edit is not an oracle." A `replace` swaps the pinned,
+  # content-addressed module for a working tree, and every claim settled against
+  # it is void. This is the static half; provenance.sh checks the resolved build.
+  if grep -qE "^[[:space:]]*replace[[:space:]].*$GO_MOD|^[[:space:]]*$GO_MOD[[:space:]]*=>" go/go.mod; then
+    bad "go/go.mod REPLACEs $GO_MOD.
+       The oracle must be the pinned pseudo-version, content-addressed via go.sum.
+       Use a gitignored go.work to hack on client-go locally; CI sets GOWORK=off."
+  fi
+
+  # go.sum is what makes the oracle content-addressed. Without it the version is a
+  # name, not a fact.
+  [ -f go/go.sum ] || bad "go/go.sum is missing — the oracle is not content-addressed without it."
+
+  # A tracked go.work would defeat GOWORK=off for everyone who cloned.
+  if git ls-files --error-unmatch go/go.work >/dev/null 2>&1; then
+    bad "go/go.work is TRACKED. It must be gitignored — it is the local escape hatch, not a shared setting."
+  fi
 else
   note "go/go.mod not present yet — skipping (arrives with the Go runner)"
+fi
+
+# ── 2b. The client-go sibling, if present, must BE the pinned rev ────────────
+# The harness reads client-go's source to state the oracle half of a claim ("this
+# is what client-go does here"). Reading a DIFFERENT client-go than the one the
+# ledger names makes that half a guess. Nothing checked this before; the sibling
+# happened to be on-pin by luck, which is not a property you can rely on twice.
+if [ -d "$CLIENT_GO/.git" ]; then
+  have=$(git -C "$CLIENT_GO" rev-parse HEAD)
+  if [ "$have" = "$GO_REV" ]; then
+    note "client-go sibling is at the pinned rev — OK"
+  else
+    bad "the client-go sibling ($CLIENT_GO) is at $have, but pins client_go.rev is $GO_REV.
+       Every oracle claim quotes this tree. Reading a different client-go than the one
+       the ledger names makes the oracle half of every claim unverified."
+  fi
+else
+  note "no client-go sibling checkout at $CLIENT_GO — skipping (the pinned module is what CI builds)"
 fi
 
 # ── 3. The client-rust pin MUST be an ancestor of upstream's master ──────────
