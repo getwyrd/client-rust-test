@@ -196,13 +196,29 @@ impl Driver {
                 }
             }
 
-            // Ground truth for durable lock residue, symmetric with the Go driver's
-            // StoreProbe.ScanLocks. This is what makes findings 1 and 2 DIFFABLE.
+            // Ground truth for durable lock residue, and it must answer the SAME QUESTION
+            // as the Go driver's StoreProbe.ScanLocks: "every lock in [start, end)".
+            //
+            // The two clients do not offer that question at the same altitude, and the
+            // difference is a trap. `TransactionClient::scan_locks`'s third argument is a
+            // BATCH SIZE, not a limit: the plan (retry_multi_region -> Collect) returns up
+            // to that many locks PER REGION and does not page within one. client-go's
+            // probe pages to exhaustion (an internal loop at 1024/iteration). Pass a batch
+            // size through naively and the two drivers silently answer different
+            // questions — Rust truncating where Go does not — which would manufacture a
+            // lock-count divergence out of harness semantics rather than client behaviour.
+            //
+            // So the Rust driver PAGES, advancing past the last key it saw, exactly as
+            // client-go's own probe does. That is not papering over a client deficiency:
+            // the batch API is doing precisely what it says, and both clients' test
+            // helpers have to loop over it. What would be dishonest is truncating Go's
+            // result to match Rust's cap — that would HIDE locks, and the whole point of
+            // this observation is to see what residue is left behind.
             Command::ScanLocks {
                 client,
                 start,
                 end,
-                limit,
+                batch_size,
             } => {
                 let Some(c) = self.clients.get(&client) else {
                     return Response::observation(Observation::driver_error(format!(
@@ -217,23 +233,57 @@ impl Driver {
                         )))
                     }
                 };
-                let range = start.bytes()..end.bytes();
-                match c.scan_locks(&ts, range, limit).await {
-                    Ok(locks) => {
-                        let locks = locks
-                            .into_iter()
-                            .map(|l| LockObs {
-                                key: l.key.into(),
-                                primary: l.primary_lock.into(),
-                                kind: lock_kind(l.lock_type),
-                                ttl_ms: l.lock_ttl,
-                                txn_start_ts: l.lock_version,
-                            })
-                            .collect();
-                        Response::observation(Observation::ok().with_locks(locks))
+
+                let end_key = end.bytes();
+                let mut cursor = start.bytes();
+                let mut locks: Vec<LockObs> = Vec::new();
+
+                loop {
+                    let batch = match c
+                        .scan_locks(&ts, cursor.clone()..end_key.clone(), batch_size)
+                        .await
+                    {
+                        Ok(b) => b,
+                        Err(e) => return Response::observation(classify(&e)),
+                    };
+                    if batch.is_empty() {
+                        break;
                     }
-                    Err(e) => Response::observation(classify(&e)),
+
+                    // Advance past the greatest key we saw. `Collect` merges per-region
+                    // results, so the batch is not guaranteed sorted; take the max rather
+                    // than the last, or a page boundary could rewind the cursor and loop
+                    // forever.
+                    let Some(furthest) = batch.iter().map(|l| l.key.clone()).max() else {
+                        break;
+                    };
+
+                    let before = locks.len();
+                    locks.extend(batch.into_iter().map(|l| LockObs {
+                        key: l.key.into(),
+                        primary: l.primary_lock.into(),
+                        kind: lock_kind(l.lock_type),
+                        ttl_ms: l.lock_ttl,
+                        txn_start_ts: l.lock_version,
+                    }));
+
+                    // A page that added nothing new cannot make progress, and the cursor
+                    // is about to be set past `furthest` anyway; stop rather than spin.
+                    if locks.len() == before {
+                        break;
+                    }
+
+                    // Next key after `furthest`: append a 0 byte (no key sorts between
+                    // `k` and `k\0`), which is the standard exclusive-successor trick and
+                    // cannot overflow the way an increment could.
+                    cursor = furthest;
+                    cursor.push(0);
+                    if cursor >= end_key {
+                        break;
+                    }
                 }
+
+                Response::observation(Observation::ok().with_locks(locks))
             }
 
             // ── THE ASYMMETRY, STATED RATHER THAN PAPERED OVER ───────────────

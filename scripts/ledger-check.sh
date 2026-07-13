@@ -76,6 +76,18 @@ if cg.get("replaced") is True:
     refuse("client-go is REPLACED — the oracle is a local tree you can edit, not the pinned module")
 if cg.get("matches_pin") is not True:
     refuse(f"client-go resolved to {cg.get('version')}, but the pin names {cg.get('pinned_version')}")
+
+# The SERVER is half of every behavioural claim. Lock resolution, prewrite residue and
+# conflict shapes are server behaviour as much as client behaviour, so a run against an
+# unidentified or off-pin TiKV certifies nothing — however pinned the two clients were.
+cl = p["cluster"]
+if cl.get("verified") is not True:
+    refuse(f"the cluster at {cl.get('pd_addr')} could not be identified (no PD reachable)")
+if cl.get("matches_pin") is not True:
+    refuse(
+        f"the cluster is PD {cl.get('observed_pd_version')} / TiKV [{cl.get('observed_tikv_versions')}], "
+        f"but the pin names {cl.get('pinned_version')}"
+    )
 PY
 
 # ── 2. THE ORACLE MUST BE THE PINNED ORACLE, AS THE BINARY ITSELF REPORTS IT ─────────

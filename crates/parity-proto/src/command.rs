@@ -70,11 +70,19 @@ pub enum Command {
     /// Ground truth for durable lock residue. Symmetric across both clients
     /// (Rust: `TransactionClient::scan_locks`; Go: `tikv.StoreProbe.ScanLocks`),
     /// which is what makes findings 1 and 2 diffable rather than merely assertable.
+    ///
+    /// CONTRACT: a driver MUST return **every lock in `[start, end)`** — never a
+    /// truncated view. `batch_size` is a PAGING HINT, not a limit, and it is named that
+    /// way on purpose: `TransactionClient::scan_locks` takes a per-region batch size and
+    /// does NOT page within a region, while client-go's probe pages to exhaustion. A
+    /// driver that passed this through as a cap would answer a different question from
+    /// its counterpart and manufacture a lock-count divergence out of harness semantics
+    /// rather than client behaviour. Each driver pages as its client requires.
     ScanLocks {
         client: String,
         start: KeyArg,
         end: KeyArg,
-        limit: u32,
+        batch_size: u32,
     },
 
     /// Prewrite a chosen subset of keys and STOP — no commit, no rollback.

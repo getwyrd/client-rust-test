@@ -199,12 +199,12 @@ fn substitute(cmd: &Command, prefix: &str) -> Command {
             client,
             start,
             end,
-            limit,
+            batch_size,
         } => ScanLocks {
             client: client.clone(),
             start: start.substitute(prefix),
             end: end.substitute(prefix),
-            limit: *limit,
+            batch_size: *batch_size,
         },
         PrewriteOnly {
             session,

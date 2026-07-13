@@ -88,6 +88,56 @@ if [ "$go_verified" = true ]; then
   [ "$go_replaced" = "false" ] || go_on_pin=false
 fi
 
+# ── The CLUSTER's provenance ─────────────────────────────────────────────────
+# Ask the RUNNING CLUSTER what it is. Do not re-read what we asked for.
+#
+# Copying cluster.pd_image out of pins.toml would record what the harness BELIEVES,
+# not what it EXERCISED — the same hole this file's header rightly complains about
+# for Rust, and the same one the client_go stamp above closes. It is worth spelling
+# out why it matters here: $PD_ADDRS can point anywhere. `make ledger` does not
+# depend on `cluster-up`, so a run against a hand-started TiKV of some other version
+# would otherwise be stamped with the pinned image digests and published as a pinned
+# run. Every behavioural claim in the ledger is a claim about a CLIENT talking to a
+# SPECIFIC TiKV; certifying one against an unknown server is not evidence.
+#
+# PD's HTTP API is the ground truth (the same source crates/harness uses for region
+# layout). The image DIGEST cannot be recovered from a running cluster, so what is
+# checked is the version it reports — which is what a claim actually depends on.
+PD_ONE="${PD_ADDRS:-127.0.0.1:2379}"
+PD_ONE="${PD_ONE%%,*}"
+TIKV_VER_PIN=$(pin cluster.tikv_version)
+
+pd_version=""
+tikv_versions=""
+cluster_verified=false
+cluster_on_pin=true
+
+if pd_json=$(curl -sf --max-time 5 "http://${PD_ONE}/pd/api/v1/version" 2>/dev/null); then
+  pd_version=$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('version',''))" "$pd_json")
+  if stores_json=$(curl -sf --max-time 5 "http://${PD_ONE}/pd/api/v1/stores" 2>/dev/null); then
+    # Every store that is Up, by version. A mixed-version cluster is itself a red flag.
+    tikv_versions=$(python3 -c "
+import json,sys
+d = json.loads(sys.argv[1])
+vs = sorted({s['store'].get('version','?') for s in d.get('stores', [])
+             if s['store'].get('state_name') == 'Up'})
+print(','.join(vs))" "$stores_json")
+    cluster_verified=true
+  fi
+fi
+
+if [ "$cluster_verified" = true ]; then
+  # PD reports "v8.5.5"; TiKV stores report "8.5.5". Compare without the leading v.
+  want="${TIKV_VER_PIN#v}"
+  [ "${pd_version#v}" = "$want" ] || cluster_on_pin=false
+  [ -n "$tikv_versions" ] || cluster_on_pin=false
+  for v in ${tikv_versions//,/ }; do
+    [ "${v#v}" = "$want" ] || cluster_on_pin=false
+  done
+else
+  cluster_on_pin=false
+fi
+
 mkdir -p "$(dirname "$OUT")"
 cat > "$OUT" <<EOF
 {
@@ -111,7 +161,16 @@ cat > "$OUT" <<EOF
     "verified": $go_verified,
     "matches_pin": $go_on_pin
   },
-  "cluster": { "pd_image": "$(pin cluster.pd_image)", "tikv_image": "$(pin cluster.tikv_image)" },
+  "cluster": {
+    "pd_addr": "$PD_ONE",
+    "pinned_version": "$TIKV_VER_PIN",
+    "pinned_pd_image": "$(pin cluster.pd_image)",
+    "pinned_tikv_image": "$(pin cluster.tikv_image)",
+    "observed_pd_version": "$pd_version",
+    "observed_tikv_versions": "$tikv_versions",
+    "verified": $cluster_verified,
+    "matches_pin": $cluster_on_pin
+  },
   "toolchain": { "rust": "$(rustc -V 2>/dev/null || echo unknown)", "go": "$(go version 2>/dev/null || echo absent)" },
   "harness": { "rev": "$(git rev-parse HEAD)", "dirty": $( [ -n "$(git status --porcelain)" ] && echo true || echo false ) }
 }
@@ -125,6 +184,42 @@ if [ "$go_verified" = true ]; then
   echo "  client-go:   $go_resolved (resolved by go list -m)"
 else
   echo "  client-go:   $go_resolved (UNVERIFIED — no go/ module or no go toolchain)"
+fi
+
+if [ "$cluster_verified" = true ]; then
+  echo "  cluster:     PD $pd_version, TiKV $tikv_versions (asked $PD_ONE)"
+else
+  echo "  cluster:     UNVERIFIED — no PD reachable at $PD_ONE"
+fi
+
+# ── The cluster gate ─────────────────────────────────────────────────────────
+# Under PARITY_STRICT, a cluster we could not identify is a REFUSAL, not a shrug.
+# check-pins.sh already states the principle: "an unverifiable invariant is not a
+# satisfied one." A behavioural claim is a claim about a client talking to a
+# specific TiKV; against an unknown server it certifies nothing.
+if [ "$cluster_on_pin" = false ]; then
+  if [ "$cluster_verified" = false ]; then
+    why="no PD reachable at $PD_ONE, so the cluster under test cannot be identified"
+  else
+    why="the cluster is PD $pd_version / TiKV [$tikv_versions], but the pin names $TIKV_VER_PIN"
+  fi
+  if [ "$STRICT" = "1" ]; then
+    cat >&2 <<EOF
+
+REFUSING TO RUN: $why.
+
+Every behavioural claim in the ledger is a claim about a CLIENT talking to a SPECIFIC
+TiKV. Lock resolution, prewrite residue and conflict shapes are all server behaviour as
+much as client behaviour, so a result gathered against an unknown or different server is
+not evidence for the pinned world — it merely looks like it.
+
+Run \`make cluster-up\` (digest-pinned images from pins.toml), or point \$PD_ADDRS at a
+cluster of the pinned version, or re-pin cluster.tikv_version (a reviewed change: it
+re-states every ledger claim).
+EOF
+    exit 1
+  fi
+  echo "  cluster:     OFF PIN — $why (advisory; CI refuses this)" >&2
 fi
 
 # ── The oracle gate ──────────────────────────────────────────────────────────

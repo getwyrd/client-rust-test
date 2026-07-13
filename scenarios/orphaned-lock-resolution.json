@@ -46,7 +46,7 @@
       "cmd": { "op": "scan_locks", "client": "c",
                "start": { "s": "{P}" },
                "end":   { "s": "{P}~" },
-               "limit": 16 } },
+               "batch_size": 16 } },
 
     { "id": "ttl-expiry", "why": "The orphan's lock TTL is 1000ms (set by the Go orphaner). Wait it out with margin, so resolution is unambiguously the reader's job and no doubt remains that the txn might still be live.",
       "cmd": { "op": "sleep", "ms": 4000 } },
@@ -64,6 +64,6 @@
       "cmd": { "op": "scan_locks", "client": "c",
                "start": { "s": "{P}" },
                "end":   { "s": "{P}~" },
-               "limit": 16 } }
+               "batch_size": 16 } }
   ]
 }

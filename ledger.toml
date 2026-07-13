@@ -131,7 +131,7 @@ subject = "true"
 step    = "reader-final-read"
 path    = "proto.type"
 oracle  = "<step absent>"
-subject = "key_error.txn_not_found.start_ts"
+subject = "key_error.txn_not_found"
 
 [[gap.divergence]]
 step    = "reader-locks-after"

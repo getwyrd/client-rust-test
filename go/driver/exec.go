@@ -31,7 +31,13 @@ type Command struct {
 
 	Start *KeyArg `json:"start,omitempty"`
 	End   *KeyArg `json:"end,omitempty"`
-	Limit uint32  `json:"limit,omitempty"`
+	// A PAGING HINT, not a limit — see parity_proto::Command::ScanLocks. A driver must
+	// return EVERY lock in [start, end). StoreProbe.ScanLocks already pages to
+	// exhaustion internally (1024/iteration), so the Go driver has nothing to do with
+	// this value; the Rust driver must loop, because its client's scan_locks caps
+	// per-region and does not page. Truncating here to "respect the limit" would HIDE
+	// locks, and the entire point of this observation is to see what residue is left.
+	BatchSize uint32 `json:"batch_size,omitempty"`
 }
 
 // KeyArg is {"s": "utf8"} or {"b64": "..."}.

@@ -131,6 +131,13 @@ impl Scenario {
                 self.compare
             ));
         }
+        // An unknown opt-in path must fail HERE, loudly, before a single command runs.
+        // Left to diff time it would compare nothing while looking like it compared
+        // something — the vacuous pass this whole harness exists to make impossible.
+        parity_proto::Spec {
+            also_compare: self.also_compare.clone(),
+        }
+        .validate()?;
         for want in &self.compare {
             if !self.runs.iter().any(|r| &r.name == want) {
                 return Err(format!(

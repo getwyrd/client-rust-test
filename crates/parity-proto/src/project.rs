@@ -40,12 +40,44 @@ use serde::Serialize;
 use crate::observation::Observation;
 use crate::trace::Trace;
 
+/// Every path a scenario may name in `also_compare`.
+///
+/// Closed, and validated BEFORE a run (see `Spec::validate`). A typo here used to be
+/// silently harmless in the worst possible way: an unknown path projected the same
+/// sentinel string on BOTH sides, so `diff` saw them as equal, reported nothing, and the
+/// comparison the claim explicitly asked for was never made. A scenario could then pass
+/// its ledger check on its OTHER declared divergences while the field it named as
+/// evidence went unexamined — a vacuous result wearing the costume of a verified one,
+/// which is exactly the failure this harness is built to make impossible.
+///
+/// So an unknown path is now a hard error at load time, and adding one means adding it
+/// here and teaching `project_obs` to emit it.
+pub const OPT_IN_PATHS: &[&str] = &["native.type", "proto"];
+
 /// What a comparison looks at, beyond the defaults.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Spec {
     /// Paths to compare IN ADDITION to the defaults, e.g. `native.type`.
     #[serde(default)]
     pub also_compare: Vec<String>,
+}
+
+impl Spec {
+    /// Reject an unknown opt-in path. Call this at scenario load, never at diff time —
+    /// a comparison that silently does not happen is worse than one that fails.
+    pub fn validate(&self) -> Result<(), String> {
+        for path in &self.also_compare {
+            if !OPT_IN_PATHS.contains(&path.as_str()) {
+                return Err(format!(
+                    "`also_compare` names `{path}`, which is not a projection path. \
+                     Known paths: {}. An unknown path would compare NOTHING while looking \
+                     like it compared something.",
+                    OPT_IN_PATHS.join(", ")
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A trace reduced to comparable facts: step id → path → value.
@@ -156,11 +188,20 @@ fn project_obs(obs: &Observation, prefix: &str, spec: &Spec, out: &mut BTreeMap<
                 );
             }
             other => {
-                // An unknown opt-in path is a typo in a ledger claim, and a typo that
-                // silently compares nothing would make the claim vacuously true.
-                out.insert(
-                    other.to_string(),
-                    "<UNKNOWN PROJECTION PATH — fix the ledger claim>".to_owned(),
+                // Unreachable: Spec::validate rejects unknown paths at scenario load.
+                //
+                // Belt and braces, because the failure mode here is the nastiest one
+                // available. Emitting a sentinel would put the SAME value on both sides,
+                // so `diff` would call them equal and report nothing — the requested
+                // comparison silently would not happen, and the scenario could still pass
+                // its ledger check on its other divergences. A claim that examined
+                // nothing would look exactly like a claim that held. Panic instead: an
+                // absent comparison must never be able to masquerade as a passing one.
+                panic!(
+                    "unknown projection path `{other}` reached project_obs; \
+                     Spec::validate should have rejected it at load time. \
+                     Known paths: {}",
+                    OPT_IN_PATHS.join(", ")
                 );
             }
         }
@@ -190,22 +231,34 @@ fn bucket_ttl(ttl_ms: u64) -> &'static str {
     }
 }
 
-/// The kvproto message type carried by an error, e.g. `key_error.txn_not_found`.
+/// The kvproto MESSAGE TYPE carried by an error, e.g. `key_error.txn_not_found`.
+///
+/// Exactly two levels — container and message — and never further. The encoding is
+/// defined by the drivers themselves (both halves), and it is always
+/// `{container: {message: payload}}`.
+///
+/// Descending into the payload would be a bug with teeth: the drivers do not carry the
+/// same payload FIELDS (Rust's TxnNotFound includes `start_ts`, Go's carries an empty
+/// object because client-go leaves that KeyError untyped and has no proto to lift the
+/// fields from). A recursive walk would render those as
+/// `key_error.txn_not_found.start_ts` vs `key_error.txn_not_found`, and two clients
+/// reporting THE SAME MESSAGE would diverge purely because one attached a field. That
+/// is a false divergence manufactured by the harness — the precise thing this file
+/// exists to avoid.
+///
+/// Payload values are still comparable: a claim opts into the full `proto` path.
 fn proto_type(p: &serde_json::Value) -> String {
-    fn first_key(v: &serde_json::Value, path: &mut Vec<String>) {
-        if let Some(obj) = v.as_object() {
-            if let Some((k, inner)) = obj.iter().next() {
-                path.push(k.clone());
-                first_key(inner, path);
-            }
-        }
-    }
-    let mut path = Vec::new();
-    first_key(p, &mut path);
-    if path.is_empty() {
-        "<empty>".to_owned()
-    } else {
-        path.join(".")
+    let Some(obj) = p.as_object() else {
+        return "<malformed>".to_owned();
+    };
+    let Some((container, inner)) = obj.iter().next() else {
+        return "<empty>".to_owned();
+    };
+    match inner.as_object().and_then(|m| m.keys().next()) {
+        Some(message) => format!("{container}.{message}"),
+        // A container whose value is a scalar (e.g. `retryable: "…"`): the container
+        // IS the message.
+        None => container.clone(),
     }
 }
 
@@ -450,6 +503,95 @@ mod tests {
             &project(&s, &Spec::default())
         )
         .is_empty());
+    }
+
+    #[test]
+    fn proto_type_is_the_message_type_and_never_descends_into_the_payload() {
+        // REGRESSION. A recursive walk rendered Rust's TxnNotFound (which carries
+        // start_ts) as `key_error.txn_not_found.start_ts` and Go's (an empty object,
+        // because client-go leaves that KeyError untyped) as `key_error.txn_not_found`.
+        // Two clients reporting THE SAME MESSAGE would then diverge purely because one
+        // attached a payload field — a false divergence manufactured by the harness.
+        let rust = trace(
+            "p/",
+            vec![step(
+                "r",
+                Observation::new(Class::TxnNotFound).with_proto(
+                    serde_json::json!({"key_error": {"txn_not_found": {"start_ts": 449}}}),
+                ),
+            )],
+        );
+        let go = trace(
+            "p/",
+            vec![step(
+                "r",
+                Observation::new(Class::TxnNotFound)
+                    .with_proto(serde_json::json!({"key_error": {"txn_not_found": {}}})),
+            )],
+        );
+
+        let d = diff(
+            &project(&rust, &Spec::default()),
+            &project(&go, &Spec::default()),
+        );
+        assert!(
+            d.is_empty(),
+            "same message, different payload — must NOT diverge by default: {d:?}"
+        );
+
+        let p = project(&rust, &Spec::default());
+        assert_eq!(p["r"]["proto.type"], "key_error.txn_not_found");
+    }
+
+    #[test]
+    fn payload_differences_are_still_visible_when_a_claim_opts_in() {
+        // The other half of the above: hiding the payload from `proto.type` must not
+        // make it unreachable — a claim can still compare the full proto.
+        let a = trace(
+            "p/",
+            vec![step(
+                "r",
+                Observation::new(Class::TxnNotFound)
+                    .with_proto(serde_json::json!({"key_error": {"txn_not_found": {}}})),
+            )],
+        );
+        let b = trace(
+            "p/",
+            vec![step(
+                "r",
+                Observation::new(Class::TxnNotFound).with_proto(
+                    serde_json::json!({"key_error": {"txn_not_found": {"start_ts": 7}}}),
+                ),
+            )],
+        );
+        let spec = Spec {
+            also_compare: vec!["proto".to_owned()],
+        };
+        assert!(!diff(&project(&a, &spec), &project(&b, &spec)).is_empty());
+    }
+
+    #[test]
+    fn an_unknown_opt_in_path_is_rejected_rather_than_silently_compared() {
+        // THE VACUOUS-PASS BUG. An unknown path used to project the same sentinel on
+        // BOTH sides, so diff() saw equality, reported nothing, and the comparison the
+        // claim explicitly asked for never happened — while the scenario could still
+        // pass its ledger check on its other divergences. A claim that examined nothing
+        // looked exactly like a claim that held.
+        let bad = Spec {
+            also_compare: vec!["native.typo".to_owned()],
+        };
+        let err = bad
+            .validate()
+            .expect_err("an unknown path must be rejected");
+        assert!(err.contains("native.typo"), "{err}");
+
+        for good in OPT_IN_PATHS {
+            Spec {
+                also_compare: vec![(*good).to_owned()],
+            }
+            .validate()
+            .unwrap_or_else(|e| panic!("`{good}` must be accepted: {e}"));
+        }
     }
 
     #[test]
