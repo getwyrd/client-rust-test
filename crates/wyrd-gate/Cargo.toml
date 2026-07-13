@@ -1,0 +1,60 @@
+[package]
+name = "wyrd-gate"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The wyrd M4 evaluation gate: an application contract (MetadataStore) prototyped over tikv-client and driven against a real TiKV/PD cluster."
+
+[features]
+# Gate the cluster-backed tests exactly like client-rust does: they need a
+# reachable TiKV/PD (see cluster/ and $PD_ADDRS) and are skipped by default.
+integration-tests = []
+
+# Fault injection, OPT-IN — and it must stay that way.
+#
+# `fail` was an unconditional dev-dependency carrying `features = ["failpoints"]`.
+# In a single package that was merely untidy. In a workspace it is a hazard:
+# `cargo test --workspace` would unify `fail/failpoints` into the SAME tikv-client
+# that a differential runner links, compiling fault-injection machinery into the
+# binary whose entire job is to observe *unmodified* client behaviour. Compiled-in
+# failpoints are inert until configured, so this is contamination rather than a
+# live bug — which is precisely the kind of thing that quietly makes a result
+# untrustworthy months later.
+#
+# Enabling it here still switches on the failpoints compiled into tikv-client (via
+# feature unification on the shared `fail` crate), which is what lets the failpoint
+# suite fail a commit *after* prewrite has placed its locks. That power is exactly
+# why it is not on by default.
+failpoints = ["dep:fail", "fail/failpoints"]
+
+[dependencies]
+tikv-client.workspace = true
+
+async-trait.workspace = true
+bytes.workspace = true
+log.workspace = true
+
+# Optional so that `failpoints` can gate it. A dev-dependency cannot be optional
+# (Cargo features cannot enable dev-dependencies), so `fail` has to be declared
+# here — the same shape client-rust itself uses.
+fail = { workspace = true, optional = true }
+
+[dev-dependencies]
+harness.workspace = true
+env_logger.workspace = true
+serde_json.workspace = true # gate.rs builds JSON value corpora
+tokio.workspace = true
+
+# The failpoint proof is its own binary: the `fail` registry is process-global, so
+# it must not share a process with the parallel commits in `gate`. It cannot even
+# build without the failpoints feature, so say so rather than failing obscurely.
+[[test]]
+name = "failpoint_gate"
+path = "tests/failpoint_gate.rs"
+required-features = ["failpoints"]
+
+[[test]]
+name = "gate"
+path = "tests/gate.rs"

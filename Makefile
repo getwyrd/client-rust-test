@@ -20,10 +20,14 @@ COMPOSE := docker compose --env-file cluster/images.env -f cluster/docker-compos
 
 default: check
 
+# --all-features would switch on `failpoints` for the whole workspace, compiling
+# fault injection into every member. Name the features instead.
+CARGO_FEATURES := --features wyrd-gate/integration-tests,wyrd-gate/failpoints
+
 check: pins-check
-	cargo fmt -- --check
-	cargo clippy --all-targets --features integration-tests -- -D warnings
-	cargo check --all-targets --features integration-tests
+	cargo fmt --all -- --check
+	cargo clippy --workspace --all-targets $(CARGO_FEATURES) -- -D warnings
+	cargo check --workspace --all-targets $(CARGO_FEATURES)
 
 # Static, cluster-free, sub-second: pins.toml agrees with rust-toolchain.toml,
 # go.mod and compose — and the client-rust pin is an ancestor of upstream/master,
@@ -39,13 +43,13 @@ provenance:
 # The cluster-free tests: prefix arithmetic, conflict classification, and the
 # compile-time Send/object-safety obligations (checked by building at all).
 unit-test:
-	cargo test --lib
+	cargo test --workspace --lib
 
 # The gate proper — needs a reachable cluster ($PD_ADDRS). `--show-output`
 # surfaces each test's captured "observed shape" evidence even when it passes,
 # so the one-shot run records the raw error shapes the findings cite.
 gate-test: provenance
-	cargo test --features integration-tests --test gate -- --show-output
+	cargo test -p wyrd-gate --features integration-tests --test gate -- --show-output
 
 # Both suites, checked against the verdict EXPECTED at the pinned revision:
 # everything green except d6 and d7, which MUST be red. Each asserts the correct
@@ -67,7 +71,8 @@ verdict: provenance
 # Separate binary, single-threaded: the `after-prewrite` failpoint is
 # process-global, so it must not run alongside `gate`'s parallel commits.
 failpoint-test: provenance
-	cargo test --features integration-tests --test failpoint_gate -- --show-output --test-threads=1
+	cargo test -p wyrd-gate --features integration-tests,failpoints --test failpoint_gate -- \
+	    --show-output --test-threads=1
 
 # One-shot: cluster up, wait ready, run everything against it. Leaves the
 # cluster running for iteration; `make cluster-down` tears it down (and its data).

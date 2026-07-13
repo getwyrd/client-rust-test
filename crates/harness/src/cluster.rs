@@ -27,14 +27,12 @@
 //! api-v1. Comparing a *raw* key against these bounds would silently give the
 //! wrong region, so encode before comparing.
 
-#![allow(dead_code)]
-
 use std::time::Duration;
 use std::time::Instant;
 
 use serde_json::Value;
 
-use super::pd_addrs;
+use crate::pd_addrs;
 
 /// Encode a raw key the way PD reports region bounds (memcomparable).
 pub fn encode_key(key: &[u8]) -> Vec<u8> {

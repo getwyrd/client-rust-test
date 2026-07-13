@@ -54,7 +54,7 @@ Notably this is not dismissible as caller error:
 ## Reproduction
 
 Deterministic test:
-`tests/gate.rs::d6_orphaned_lock_must_be_resolved_by_client_rust` in the
+`crates/wyrd-gate/tests/gate.rs::d6_orphaned_lock_must_be_resolved_by_client_rust` in the
 `client-rust-test` harness (TiKV/PD v8.5.5, single node, api-v1, no
 keyspace; client-rust `master` @ e53837d). The test asserts the *correct*
 behavior — the orphaned key must be readable once the lock's TTL expires — so

@@ -1,13 +1,21 @@
-# Code owners for client-rust-test (the wyrd M4 evaluation gate).
+# Code owners for client-rust-test (the TiKV client parity harness).
 # Requested for review automatically on any PR touching these paths.
 
 # Default owner for everything.
 *                       @eduralph
 
 # The vendored MetadataStore contract and its TiKV mapping — the load-bearing
-# surface the gate verifies. Changes here need a deliberate look.
-/src/                   @eduralph
+# surface the wyrd-gate suite verifies. Changes here need a deliberate look.
+/crates/wyrd-gate/src/  @eduralph
 
-# The gate tests and findings are the harness's output; guard their integrity.
-/tests/                 @eduralph
+# The suites and findings are the harness's output; guard their integrity.
+/crates/wyrd-gate/tests/ @eduralph
 /findings/              @eduralph
+
+# Client-agnostic fixtures: PD ground truth, cluster preconditions. Every suite
+# and every future runner rests on these being right.
+/crates/harness/        @eduralph
+
+# What the harness tests against, and how a run is admitted as evidence.
+/pins.toml              @eduralph
+/scripts/               @eduralph

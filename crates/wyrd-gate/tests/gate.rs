@@ -22,20 +22,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use client_rust_test::is_lost_race;
-use client_rust_test::traits::CommitOutcome;
-use client_rust_test::traits::MetadataStore;
-use client_rust_test::traits::WriteBatch;
-use client_rust_test::LockMode;
-use client_rust_test::SCAN_PAGE;
-use common::deterministic_bytes;
-use common::key;
 use common::store;
 use common::wipe;
+use harness::deterministic_bytes;
+use harness::key;
 use tikv_client::CheckLevel;
 use tikv_client::TransactionClient;
 use tikv_client::TransactionOptions;
 use tokio::sync::Barrier;
+use wyrd_gate::is_lost_race;
+use wyrd_gate::traits::CommitOutcome;
+use wyrd_gate::traits::MetadataStore;
+use wyrd_gate::traits::WriteBatch;
+use wyrd_gate::LockMode;
+use wyrd_gate::SCAN_PAGE;
 
 fn val(s: &str) -> Bytes {
     Bytes::copy_from_slice(s.as_bytes())
@@ -78,8 +78,8 @@ async fn p0_cluster_can_split_regions() {
     let prefix_owned = format!("gate/p0/{nanos}/");
     let prefix = prefix_owned.as_bytes();
 
-    let before = common::cluster::region_count().await;
-    let up = common::cluster::stores_up().await;
+    let before = harness::cluster::region_count().await;
+    let up = harness::cluster::stores_up().await;
     assert!(!up.is_empty(), "PD reports no TiKV store Up");
 
     // Comfortably past region-max-keys = 10, in one batch.
@@ -104,7 +104,7 @@ async fn p0_cluster_can_split_regions() {
     loop {
         // Both keys located in ONE PD snapshot: two separate lookups could
         // straddle a split/merge and report a boundary that never existed.
-        if common::cluster::are_cross_region(&lo, &hi).await {
+        if harness::cluster::are_cross_region(&lo, &hi).await {
             break;
         }
         assert!(
@@ -112,7 +112,7 @@ async fn p0_cluster_can_split_regions() {
             "PRECONDITION FAILED: 200 keys did not split across regions (cluster has {} regions, \
              was {before}). The gate's multi-region obligations are VOID without splits — check \
              that cluster/tikv.toml is mounted (region-max-keys = 10).",
-            common::cluster::region_count().await
+            harness::cluster::region_count().await
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -120,7 +120,7 @@ async fn p0_cluster_can_split_regions() {
     println!(
         "cluster splits regions: {} -> {} regions, stores Up {up:?}",
         before,
-        common::cluster::region_count().await
+        harness::cluster::region_count().await
     );
 }
 
@@ -398,7 +398,7 @@ async fn b3_file_commit_is_a_version_cas() {
 /// Race `tasks` concurrent commits of `make_batch(i)` from a barrier; return
 /// (committed tags, conflicts, faults).
 async fn race(
-    store: &client_rust_test::TikvMetadataStore,
+    store: &wyrd_gate::TikvMetadataStore,
     tasks: usize,
     make_batch: impl Fn(usize) -> WriteBatch,
 ) -> (Vec<usize>, usize, Vec<String>) {
@@ -540,7 +540,7 @@ async fn c3_write_skew_anomaly_and_the_lock_that_prevents_it() {
     const PREFIX: &[u8] = b"gate/c3/";
     let store = store(LockMode::Pessimistic).await;
     wipe(&store, PREFIX).await;
-    let client = TransactionClient::new(common::pd_addrs())
+    let client = TransactionClient::new(harness::pd_addrs())
         .await
         .expect("raw client");
 
@@ -751,7 +751,7 @@ async fn d1_write_conflict_error_shape_is_key_error_with_conflict() {
     const PREFIX: &[u8] = b"gate/d1/";
     let store = store(LockMode::Pessimistic).await;
     wipe(&store, PREFIX).await;
-    let client = TransactionClient::new(common::pd_addrs())
+    let client = TransactionClient::new(harness::pd_addrs())
         .await
         .expect("raw client");
     let contended = key(PREFIX, "contended");
@@ -794,7 +794,7 @@ async fn d2_get_for_update_reads_latest_committed_value() {
     const PREFIX: &[u8] = b"gate/d2/";
     let store = store(LockMode::Pessimistic).await;
     wipe(&store, PREFIX).await;
-    let client = TransactionClient::new(common::pd_addrs())
+    let client = TransactionClient::new(harness::pd_addrs())
         .await
         .expect("raw client");
     let inode = key(PREFIX, "inode:1");
@@ -954,7 +954,7 @@ async fn d5_woken_lock_waiter_surfaces_a_classifiable_write_conflict() {
     const PREFIX: &[u8] = b"gate/d5/";
     let store = store(LockMode::Pessimistic).await;
     wipe(&store, PREFIX).await;
-    let client = TransactionClient::new(common::pd_addrs())
+    let client = TransactionClient::new(harness::pd_addrs())
         .await
         .expect("raw client");
 
@@ -1061,7 +1061,7 @@ async fn d5_woken_lock_waiter_surfaces_a_classifiable_write_conflict() {
 #[tokio::test]
 async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
     let store = store(LockMode::Pessimistic).await;
-    let client = TransactionClient::new(common::pd_addrs())
+    let client = TransactionClient::new(harness::pd_addrs())
         .await
         .expect("raw client");
 
@@ -1105,7 +1105,7 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
     // Manufacture the orphan: an optimistic txn locks the primary and puts the
     // secondary, the primary is invalidated by a racing commit so the orphaner
     // loses at prewrite, and it is dropped WITHOUT rollback — a crash.
-    let upper = client_rust_test::prefix_upper_bound(prefix).expect("bounded prefix");
+    let upper = wyrd_gate::prefix_upper_bound(prefix).expect("bounded prefix");
     let mut orphan = None;
     for round in 0..4u32 {
         // Re-establish the precondition on EVERY attempt, not once up front.
@@ -1119,7 +1119,7 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
         // the finding" problem this precondition exists to eliminate.
         //
         // Cheap when already satisfied: one PD read.
-        common::cluster::ensure_cross_region(&primary, &secondary, &split_at).await;
+        harness::cluster::ensure_cross_region(&primary, &secondary, &split_at).await;
 
         let mut orphaner = client
             .begin_with_options(TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn))

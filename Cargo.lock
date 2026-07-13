@@ -184,21 +184,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "client-rust-test"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "env_logger",
- "fail",
- "log",
- "reqwest",
- "serde_json",
- "tikv-client",
- "tokio",
-]
-
-[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -514,6 +499,15 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "harness"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2341,6 +2335,21 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "wyrd-gate"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "env_logger",
+ "fail",
+ "harness",
+ "log",
+ "serde_json",
+ "tikv-client",
+ "tokio",
+]
 
 [[package]]
 name = "yoke"
