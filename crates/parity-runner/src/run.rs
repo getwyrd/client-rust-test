@@ -174,7 +174,13 @@ fn cmd_op(cmd: &serde_json::Value) -> String {
         .to_owned()
 }
 
-/// Substitute `{P}` in every key-ish argument of a command.
+/// Namespace every argument of a command under the run's key prefix.
+///
+/// KEY position and VALUE position are treated differently, and the distinction is
+/// load-bearing: a key MUST be namespaced (the two runs share a cluster, and the oracle
+/// deliberately leaves residue), while a binary value MUST NOT be touched (values are
+/// opaque bytes that have to round-trip byte-identically). This match is the only place
+/// that knows which field is which, so it is the only place that can get it right.
 fn substitute(cmd: &Command, prefix: &str) -> Command {
     use Command::*;
     match cmd {
@@ -184,16 +190,16 @@ fn substitute(cmd: &Command, prefix: &str) -> Command {
             value,
         } => Put {
             session: session.clone(),
-            key: key.substitute(prefix),
-            value: value.substitute(prefix),
+            key: key.as_key(prefix),
+            value: value.as_value(prefix),
         },
         Get { session, key } => Get {
             session: session.clone(),
-            key: key.substitute(prefix),
+            key: key.as_key(prefix),
         },
         SnapshotGet { client, key } => SnapshotGet {
             client: client.clone(),
-            key: key.substitute(prefix),
+            key: key.as_key(prefix),
         },
         ScanLocks {
             client,
@@ -202,8 +208,10 @@ fn substitute(cmd: &Command, prefix: &str) -> Command {
             batch_size,
         } => ScanLocks {
             client: client.clone(),
-            start: start.substitute(prefix),
-            end: end.substitute(prefix),
+            // Range bounds are keys: they must bracket THIS run's prefix, or a scan would
+            // observe the other run's locks and report them as this client's residue.
+            start: start.as_key(prefix),
+            end: end.as_key(prefix),
             batch_size: *batch_size,
         },
         PrewriteOnly {
@@ -212,8 +220,8 @@ fn substitute(cmd: &Command, prefix: &str) -> Command {
             keys,
         } => PrewriteOnly {
             session: session.clone(),
-            primary: primary.substitute(prefix),
-            keys: keys.iter().map(|k| k.substitute(prefix)).collect(),
+            primary: primary.as_key(prefix),
+            keys: keys.iter().map(|k| k.as_key(prefix)).collect(),
         },
         other => other.clone(),
     }

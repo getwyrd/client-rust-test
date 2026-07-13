@@ -138,13 +138,52 @@ impl KeyArg {
         }
     }
 
-    /// Substitute the run's key prefix. Applied by the runner before dispatch.
-    pub fn substitute(&self, prefix: &str) -> KeyArg {
+    /// Namespace this argument as a KEY under the run's prefix.
+    ///
+    /// EVERY key a scenario touches must land under the run's unique prefix, and this is
+    /// not a nicety — it is what keeps the two runs of a comparison from colliding. They
+    /// share one cluster, and the oracle run deliberately LEAVES RESIDUE (an orphaned
+    /// lock is the entire point of G-0001). An un-namespaced key would let that residue
+    /// poison the subject run, and the resulting divergence — or the resulting *absence*
+    /// of one — would be an artifact of the harness rather than a fact about either
+    /// client.
+    ///
+    /// A `{"b64": …}` key therefore gets the prefix BYTES prepended. Text keys use the
+    /// `{P}` token. Binary keys have no token to substitute, and simply passing them
+    /// through unchanged (as this once did) sent byte-identical keys to both runs — which
+    /// is exactly the collision the prefix exists to prevent, waiting for the first
+    /// scenario to test a `0xFF` boundary or any other key that cannot be written as text.
+    pub fn as_key(&self, prefix: &str) -> KeyArg {
         match self {
             KeyArg::Utf8 { s } => KeyArg::Utf8 {
                 s: s.replace("{P}", prefix),
             },
-            other => other.clone(),
+            KeyArg::B64 { b64 } => {
+                let mut bytes = prefix.as_bytes().to_vec();
+                bytes.extend(crate::observation::b64_decode(b64).unwrap_or_default());
+                KeyArg::B64 {
+                    b64: crate::observation::b64_encode(&bytes),
+                }
+            }
+        }
+    }
+
+    /// Namespace this argument as a VALUE.
+    ///
+    /// Text values still get `{P}` substituted — a value may legitimately CONTAIN a key
+    /// (a dirent pointing at an inode is exactly that shape), and it must point at the
+    /// key this run actually wrote.
+    ///
+    /// Binary values are passed through UNTOUCHED. They are opaque bytes and must round
+    /// trip byte-identically: `gate::a2` exists precisely because the store's CAS is
+    /// value-equality over a whole record, and silently prepending a prefix to a value
+    /// would corrupt exactly the property under test.
+    pub fn as_value(&self, prefix: &str) -> KeyArg {
+        match self {
+            KeyArg::Utf8 { s } => KeyArg::Utf8 {
+                s: s.replace("{P}", prefix),
+            },
+            binary => binary.clone(),
         }
     }
 }
@@ -227,16 +266,52 @@ mod tests {
     }
 
     #[test]
-    fn prefix_substitution_only_touches_utf8_args() {
+    fn a_text_key_substitutes_the_prefix_token() {
         let k = KeyArg::Utf8 {
             s: "{P}z".to_owned(),
         };
-        assert_eq!(k.substitute("run7/").bytes(), b"run7/z".to_vec());
+        assert_eq!(k.as_key("run7/").bytes(), b"run7/z".to_vec());
+    }
 
-        // A b64 arg is opaque bytes; substituting into it would corrupt the value.
-        let raw = KeyArg::B64 {
+    #[test]
+    fn a_binary_key_is_namespaced_under_the_run_prefix() {
+        // REGRESSION, and a nasty one. A b64 key used to pass through UNCHANGED, so the
+        // oracle and subject runs would write the SAME key on a SHARED cluster — and the
+        // oracle deliberately leaves residue (an orphaned lock is the whole of G-0001).
+        // The subject would then trip over the oracle's lock and the harness would report
+        // a divergence, or hide one, purely as an artifact of itself.
+        //
+        // Binary keys are not hypothetical: a 0xFF-boundary key cannot be written as text.
+        let key = KeyArg::B64 {
             b64: crate::observation::b64_encode(&[0xff, 0x00]),
         };
-        assert_eq!(raw.substitute("run7/").bytes(), vec![0xff, 0x00]);
+        assert_eq!(key.as_key("run7/").bytes(), b"run7/\xff\x00".to_vec());
+
+        // The isolation property itself: two runs, two prefixes, never the same key.
+        assert_ne!(key.as_key("runA/").bytes(), key.as_key("runB/").bytes());
+    }
+
+    #[test]
+    fn a_binary_value_is_left_byte_identical() {
+        // The other half. A value is opaque bytes and must round-trip EXACTLY: the store's
+        // CAS is value-equality over a whole record (gate::a2), so prefixing a value would
+        // corrupt the very property under test.
+        let v = KeyArg::B64 {
+            b64: crate::observation::b64_encode(&[0xff, 0x00]),
+        };
+        assert_eq!(v.as_value("run7/").bytes(), vec![0xff, 0x00]);
+    }
+
+    #[test]
+    fn a_text_value_still_substitutes_the_token() {
+        // A value may legitimately CONTAIN a key — a dirent pointing at an inode is
+        // exactly that shape — and must point at the key THIS run wrote.
+        let v = KeyArg::Utf8 {
+            s: "points-at:{P}inode".to_owned(),
+        };
+        assert_eq!(
+            v.as_value("run7/").bytes(),
+            b"points-at:run7/inode".to_vec()
+        );
     }
 }
