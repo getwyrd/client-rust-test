@@ -43,6 +43,59 @@ template for the client-parity suites to come:
   *asserted* rather than assumed. Nothing here knows what a `MetadataStore` is,
   which is what lets a future differential runner share it.
 
+## The parity harness
+
+The gate can only ever say **"client-rust fails."** It can never say **"and client-go
+succeeds"** — which is the claim that makes a gap a *gap*, and the claim every upstream
+issue needs. So the harness also drives **client-go as an oracle**, through the same
+scenarios, and diffs what the two clients observed.
+
+```
+scenarios/*.json          declarative; no conditionals, no loops
+        │
+        ▼
+crates/parity-runner  ──NDJSON──▶  crates/rust-driver  → tikv-client   (the SUBJECT)
+  owns the total order──NDJSON──▶  go/driver           → client-go     (the ORACLE)
+        │
+        ▼
+results/traces/*.json ──▶ projection ──▶ diff ──▶ ledger.toml ──▶ XDIVERGE / XCONVERGE
+```
+
+Both clients wrap the **same protobuf** — `tikv-client`'s `Error::KeyError` and
+client-go's `ErrWriteConflict` are thin wrappers over the same `kvrpcpb` messages — so
+the vocabulary the two are compared in is not invented, it is **the server's**. Each
+observation keeps three layers: the canonical `class` (always compared), the `proto`
+(presence compared), and the client's *own* error taxonomy in `native` (never compared
+by default, always kept as evidence). Nothing is normalized at capture; the projection
+decides what a given claim looks at. **Canonicalize the question, never the evidence** —
+a projection can be widened later, but evidence discarded at capture is gone.
+
+That layering is not decoration. `G-0001`'s root cause *is* a native-taxonomy bug —
+`check_txn_status` matches `Error::ExtractedErrors` but only ever receives
+`Error::MultipleKeyErrors` — and both map to the same canonical class. A class-only diff
+would call the two clients identical and the bug would be invisible.
+
+`ledger.toml` declares each gap **field by field**, and `scripts/ledger-check.sh`
+generalizes `gate-verdict.sh` from *"a substring in stdout"* to *"a field in a trace"*:
+
+| declared | observed | verdict |
+|---|---|---|
+| `diverges` | diverged as declared | **XDIVERGE** — the gap is still open ✅ |
+| `diverges` | **agreed** | **XCONVERGE** — hard fail: the gap closed; pin/README/ledger are stale |
+| `diverges` | diverged *differently* | **WRONG DIVERGENCE** — hard fail: evidence of nothing |
+| `agrees` | diverged | **NEW GAP** — hard fail: file it, or fix it |
+
+A run is refused outright unless its provenance is admissible: `PARITY_STRICT`, the crate
+under test on-pin and clean, and — reported by the Go driver from its *own*
+`debug.ReadBuildInfo()` — client-go at the pinned version and **not `replace`d**. This is
+where `pins.toml`'s *"an oracle you can accidentally edit is not an oracle"* stops being
+a comment.
+
+```sh
+make parity    # run every scenario against both clients, report the diff
+make ledger    # ...and check the diff against its declared expectation
+```
+
 ## Layout
 
 A Cargo workspace, developed against a sibling checkout of the crate under test (a
@@ -50,16 +103,25 @@ path dependency, so local work on client-rust is what the gate exercises):
 
 ```
 wyrd/
-├── client-rust/        # tikv/client-rust — the crate under test
-└── client-rust-test/   # this harness (depends only on ../client-rust)
+├── client-rust/        # tikv/client-rust — the SUBJECT under test
+└── client-rust-test/   # this harness
     ├── crates/
-    │   ├── harness/    # client-agnostic: $PD_ADDRS, PD region ground truth
-    │   └── wyrd-gate/  # the M4 evaluation gate (one suite among those to come)
-    ├── cluster/        # throwaway single-node PD + TiKV (digest-pinned)
-    ├── scripts/        # pins, provenance, the verdict
-    ├── findings/       # the harness's output: write-ups, repros, evidence
-    └── pins.toml       # what is under test — the single source of truth
+    │   ├── harness/        # client-agnostic: $PD_ADDRS, PD region ground truth
+    │   ├── wyrd-gate/      # the M4 evaluation gate (one suite among those to come)
+    │   ├── parity-proto/   # the protocol + observation schema. NO client deps.
+    │   ├── rust-driver/    # drives tikv-client  (the subject)
+    │   └── parity-runner/  # the comparator. Links NEITHER client, on purpose.
+    ├── go/                 # drives client-go (the ORACLE), at the pinned module
+    ├── scenarios/          # one scenario, two clients, one diff
+    ├── cluster/            # throwaway single-node PD + TiKV (digest-pinned)
+    ├── scripts/            # pins, provenance, the verdicts
+    ├── findings/           # the harness's output: write-ups, repros, evidence
+    ├── ledger.toml         # every gap, with a declared expectation
+    └── pins.toml           # what is under test — the single source of truth
 ```
+
+`parity-runner` links neither client, and that is enforced in its `Cargo.toml`: the thing
+that decides a verdict must not be able to reach for the crate it is adjudicating.
 
 Toolchain is pinned to 1.93.0, matching client-rust.
 
@@ -133,8 +195,18 @@ does not work around any of them; each is surfaced by a test and belongs
 fixed in client-rust.
 
 1. **Bug (regression in #519) — an orphaned lock is never resolved; filing-ready**
-   (`d6`, currently **red** on `e53837d`;
-   [findings/](findings/txn-not-found-lock-resolution.md)). A lock on a
+   (`d6`, currently **red** on `e53837d`; ledger **`G-0001`**, XDIVERGE;
+   [findings/](findings/txn-not-found-lock-resolution.md)). **Now also stated against
+   the oracle**: `scenarios/orphaned-lock-resolution.json` manufactures one orphan with
+   client-go's `CommitterProbe` and hands it to *each* client to resolve. client-go's
+   read succeeds and its resolver clears the lock (0 remaining); client-rust's read
+   fails with `MultipleKeyErrors` and the lock is still there (1 remaining). Because
+   both runs share one setup, the divergence is attributable to the **reader alone** —
+   which `d6` cannot claim, since it must manufacture the orphan through the public API
+   with a region split and a racing txn, and so cannot tell *"I failed to build the
+   orphan"* apart from *"the client failed to resolve it"*. Verified both ways: applying
+   [the fix](findings/fix-check-txn-status-wrapper.patch) makes the divergence vanish
+   entirely, and `ledger-check` then fails with **XCONVERGE**, as it must. A lock on a
    secondary key whose primary was never written (crash between per-region
    prewrites, or a failed commit's residue) makes the key unreadable **and
    unwritable** forever: `MultipleKeyErrors([KeyError { txn_not_found }])`,

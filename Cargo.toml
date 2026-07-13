@@ -33,11 +33,16 @@ publish = false
 tikv-client = { path = "../client-rust" }
 
 harness = { path = "crates/harness" }
+# The parity protocol: the schema both drivers speak. Depends on NEITHER client, so
+# that parity-runner (which decides the verdict) cannot transitively reach the crate
+# under test.
+parity-proto = { path = "crates/parity-proto" }
 
 async-trait = "0.1"
 bytes = "1"
 env_logger = "0.10"
 log = "0.4"
+serde = { version = "1", features = ["derive"] }
 # PD's HTTP API is the ground truth for region layout. rustls, not native-tls: PD
 # is plain HTTP here, and this avoids an OpenSSL build just to read /pd/api/v1/*.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

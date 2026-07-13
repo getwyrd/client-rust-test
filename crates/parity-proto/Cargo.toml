@@ -1,0 +1,19 @@
+# The parity protocol: the schema both drivers speak.
+#
+# NOTE WHAT IS ABSENT: tikv-client. This crate is the CONTRACT, not a party to it.
+# parity-runner (which decides the verdict) depends on this crate, so if the schema
+# linked the subject under test, the comparator would transitively link it too — and
+# a comparator that can reach for the client it is adjudicating is not one you can
+# trust. Each driver owns its own half of the mapping table instead.
+[package]
+name = "parity-proto"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The parity command protocol, the layered observation schema, and the projection that makes two TiKV clients comparable."
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true

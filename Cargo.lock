@@ -1000,6 +1000,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "parity-proto"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "parity-runner"
+version = "0.1.0"
+dependencies = [
+ "harness",
+ "parity-proto",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1424,6 +1442,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-driver"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "harness",
+ "libc",
+ "parity-proto",
+ "serde",
+ "serde_json",
+ "tikv-client",
+ "tokio",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1563,6 +1595,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

@@ -1,0 +1,140 @@
+# THE PARITY LEDGER — every gap between tikv/client-rust (the SUBJECT) and
+# tikv/client-go (the ORACLE), with a declared expectation and machine-checked evidence.
+#
+# This file is the verdict. `scripts/ledger-check.sh` proves it against a PINNED run and
+# refuses any result whose provenance says strict:false.
+#
+# ─── THE RULE THAT MAKES THIS HONEST ─────────────────────────────────────────────────
+#
+# Every entry declares a POLARITY, and the wrong outcome is a HARD FAILURE in BOTH
+# directions. This generalizes scripts/gate-verdict.sh from "a substring in stdout" to
+# "a field in a trace":
+#
+#   expect = "diverges"   The gap is OPEN. The two clients MUST differ, and differ in
+#                         the PREDICTED way.
+#
+#     diverged as declared  -> XDIVERGE        correct; the gap is still open.
+#     did NOT diverge       -> XCONVERGE       HARD FAILURE. The gap closed upstream, so
+#                                              the pin, the README and this ledger are
+#                                              all stale. Good news, and loud on purpose:
+#                                              without this rule the harness would rot
+#                                              into "these are red forever" and nobody
+#                                              would notice the day a fix landed.
+#     diverged differently  -> WRONG DIVERGENCE HARD FAILURE. They differ, but not as
+#                                              predicted, so this run is evidence of
+#                                              NOTHING — it may be a broken harness
+#                                              rather than a confirmed finding. Accepting
+#                                              any difference as proof is exactly how a
+#                                              broken harness masquerades as a finding.
+#
+#   expect = "agrees"     The two clients MUST behave identically here.
+#
+#     agreed                -> HOLDS
+#     diverged              -> NEW GAP         HARD FAILURE. An undeclared difference:
+#                                              file it, or fix it. This is the regression
+#                                              net, and it is what makes the comparator
+#                                              trustworthy — a comparator that only ever
+#                                              reports divergence cannot be believed.
+#
+# A gap is declared FIELD BY FIELD. It is not enough that the clients differ; they must
+# differ in the way we said they would.
+
+schema = "parity-ledger/v1"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# G-0001 — An orphaned lock is never resolved.
+#
+# Filed upstream as tikv/client-rust#543; the fix is PR #544 (a one-line widening of the
+# match arm), which is NOT in the pinned revision. So this gap is OPEN, and the day the
+# pin moves past the fix, XCONVERGE fires and this entry must be re-stated.
+# ══════════════════════════════════════════════════════════════════════════════════════
+[[gap]]
+id     = "G-0001"
+slug   = "orphaned-lock-never-resolved"
+kind   = "behavioral"
+area   = "txn.lock-resolution"
+status = "OPEN"
+
+title = "An orphaned lock (primary never written) is never resolved; the key is left unreadable AND unwritable"
+
+expectation = """
+A key under a lock whose primary transaction has no lock and no commit/rollback record
+must become usable again once the lock's TTL expires: the client must escalate to
+rollback_if_not_exist, as client-go's LockResolver does.
+
+client-rust does not. `check_txn_status` matches `Error::ExtractedErrors`, but its plan
+shape (retry_multi_region -> merge(CollectSingle) -> extract_error) can only ever deliver
+the key error as `Error::MultipleKeyErrors` — so the `rollback_if_not_exist` escalation in
+`get_txn_status_from_lock` is DEAD CODE. Introduced by 7d80f59 (#519); the pre-#519
+resolver recovered this state via the legacy Cleanup path.
+"""
+
+scenario = "scenarios/orphaned-lock-resolution.json"
+expect   = "diverges"
+
+upstream_issue = "https://github.com/tikv/client-rust/issues/543"
+upstream_pr    = "https://github.com/tikv/client-rust/pull/544"
+finding        = "findings/txn-not-found-lock-resolution.md"
+
+# ─── The declared divergence. Anything MORE, or anything DIFFERENT, is a hard failure.
+#
+# Note what each row buys, because between them they close the loopholes a weaker claim
+# would leave open:
+
+# 1. The read ERRORS instead of succeeding. (`not_found` is the correct answer for the
+#    oracle: the orphaning txn never committed, so resolving it means rolling it back,
+#    and the key is then legitimately absent. The bug is not "the value is missing" —
+#    it is that client-rust cannot read the key AT ALL.)
+[[gap.divergence]]
+step    = "reader-final-read"
+path    = "class"
+oracle  = "not_found"
+subject = "txn_not_found"
+
+# 2. THE ROOT CAUSE, IN EVIDENCE. `native.type` is not compared by default — both
+#    clients report the same canonical fact here, so a class-only diff would call them
+#    identical. Opting in (scenario.also_compare) exposes the client's OWN taxonomy, and
+#    `MultipleKeyErrors` is precisely the variant #543 says arrives where the code
+#    expects `ExtractedErrors`. The bug is legible in the trace.
+#
+#    The oracle side is `<absent>` because client-go's read SUCCEEDS — there is no error,
+#    so there is no error taxonomy to report. (Go's ErrNotExist sentinel is a calling
+#    convention for "key absent", not an error about TiKV, so the driver does not dress
+#    it up as one; see go/driver/observation.go. Otherwise every not_found comparison in
+#    the harness would carry a permanent, meaningless native.type divergence.)
+[[gap.divergence]]
+step    = "reader-final-read"
+path    = "native.type"
+oracle  = "<absent>"
+subject = "MultipleKeyErrors"
+
+# 3. THE STRONGER HALF: the lock is still THERE. A client that merely read past the
+#    orphan would have left the key unwritable. client-go removes it (asynchronously);
+#    client-rust leaves it forever, unchanged by TTL expiry.
+[[gap.divergence]]
+step    = "reader-locks-after"
+path    = "locks.count"
+oracle  = "0"
+subject = "1"
+
+# The two rows below are consequences of (1) — client-rust's error carries a kvproto and
+# client-go's untyped TxnNotFound does not. Declared so that the divergence set is
+# COMPLETE: an undeclared extra divergence is a WRONG DIVERGENCE, and it should be,
+# because it means something changed that we did not predict.
+[[gap.divergence]]
+step    = "reader-final-read"
+path    = "proto.present"
+oracle  = "false"
+subject = "true"
+
+[[gap.divergence]]
+step    = "reader-final-read"
+path    = "proto.type"
+oracle  = "<step absent>"
+subject = "key_error.txn_not_found"
+
+[[gap.divergence]]
+step    = "reader-locks-after"
+path    = "locks"
+oracle  = ""
+subject = "key={P}z-secondary primary={P}a-primary kind=put ttl=positive"
