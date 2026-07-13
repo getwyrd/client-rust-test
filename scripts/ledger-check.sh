@@ -82,6 +82,28 @@ for f in results:
     if p.get("strict") is not True:
         refuse(f"{f}: produced with strict:false — not admissible as evidence")
 
+    # ── THE HARNESS IS THE INSTRUMENT ────────────────────────────────────────────
+    # A modified runner, driver, projection, scenario or ledger can change the observed
+    # divergence — or manufacture the declared one outright — while every client stays
+    # perfectly on-pin and this script reports success. Pinning what is MEASURED while
+    # leaving what MEASURES uncontrolled is not a verified result; it is a verified
+    # subject and an unverified instrument.
+    #
+    # provenance.sh has recorded harness.rev and harness.dirty from the start. Nothing
+    # read them. So: evidence must come from a COMMITTED harness. Its revision is
+    # recorded either way, so any claim can be reproduced against the exact harness that
+    # produced it.
+    #
+    # (Iterating on the harness therefore cannot settle the ledger, which is the point,
+    # and is the same rule already applied to a dirty client-rust. `make parity` still
+    # reports the diff; it just does not claim to have proved anything.)
+    h = p.get("harness", {})
+    if h.get("dirty") is not False:
+        refuse(f"{f}: produced by a DIRTY harness (rev {h.get('rev')}). The harness is the "
+               "instrument: a modified runner, projection or scenario can change — or "
+               "manufacture — the very divergence being adjudicated. Commit the harness, "
+               "then re-run `make ledger`.")
+
     cr = p["client_rust"]
     if cr.get("matches_pin") is not True:
         refuse(f"{f}: produced against an off-pin client-rust "

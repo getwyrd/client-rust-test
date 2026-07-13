@@ -113,6 +113,32 @@ pub enum Command {
     },
 }
 
+impl Command {
+    /// Every byte-string argument this command carries, in any position.
+    ///
+    /// Used by scenario validation to reject malformed base64 before a single command is
+    /// dispatched.
+    pub fn args(&self) -> Vec<&KeyArg> {
+        match self {
+            Command::Put { key, value, .. } => vec![key, value],
+            Command::Get { key, .. } | Command::SnapshotGet { key, .. } => vec![key],
+            Command::ScanLocks { start, end, .. } => vec![start, end],
+            Command::PrewriteOnly { primary, keys, .. } => {
+                let mut v = vec![primary];
+                v.extend(keys.iter());
+                v
+            }
+            Command::Hello
+            | Command::OpenClient { .. }
+            | Command::CloseClient { .. }
+            | Command::Begin { .. }
+            | Command::Commit { .. }
+            | Command::Rollback { .. }
+            | Command::Abandon { .. } => vec![],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TxnMode {
@@ -131,9 +157,26 @@ pub enum KeyArg {
 }
 
 impl KeyArg {
+    /// Reject malformed base64 at SCENARIO LOAD, before anything runs.
+    ///
+    /// `bytes()` cannot fail (it is called deep inside the drivers), so a bad `b64`
+    /// silently decoded to an EMPTY byte string. Both drivers would then agree on a
+    /// prefix-only key or an empty value, the diff would be clean, and the ledger would
+    /// certify a scenario nobody wrote — a green result for a test that never happened.
+    /// A typo in a scenario must be a loud failure, not a quiet substitution.
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            KeyArg::Utf8 { .. } => Ok(()),
+            KeyArg::B64 { b64 } => crate::observation::b64_decode(b64).map(|_| ()).ok_or_else(|| {
+                format!("`{b64}` is not valid base64. A malformed key or value would decode to EMPTY bytes and silently test something other than what was written.")
+            }),
+        }
+    }
+
     pub fn bytes(&self) -> Vec<u8> {
         match self {
             KeyArg::Utf8 { s } => s.as_bytes().to_vec(),
+            // Safe: `validate()` runs at scenario load and rejects malformed base64.
             KeyArg::B64 { b64 } => crate::observation::b64_decode(b64).unwrap_or_default(),
         }
     }

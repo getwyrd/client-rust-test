@@ -151,6 +151,32 @@ impl Scenario {
                 return Err(format!("duplicate run name `{}`", run.name));
             }
         }
+        // Distinct NAMES are not enough. Two runs can be named differently and still bind
+        // every role to the same driver — comparing, say, all-Go against all-Go. The diff
+        // is then empty for a reason that has nothing to do with either client, and an
+        // `expect = "agrees"` claim passes without client-rust ever being exercised. This
+        // is the self-comparison hole wearing a different name, so it is closed here too:
+        // the two compared runs must actually CONTRAST something.
+        //
+        // The runs are looked up (not `expect`ed) because `compare` naming an undefined
+        // run is a scenario error, and it must be REPORTED, not panicked on.
+        let (a, b) = (&self.compare[0], &self.compare[1]);
+        let find = |want: &String| {
+            self.runs
+                .iter()
+                .find(|r| &r.name == want)
+                .ok_or_else(|| format!("`compare` names run `{want}`, which is not defined"))
+        };
+        let bind_a = &find(a)?.bind;
+        let bind_b = &find(b)?.bind;
+        if bind_a == bind_b {
+            return Err(format!(
+                "runs `{a}` and `{b}` bind every role to the same driver ({bind_a:?}), so \
+                 comparing them contrasts nothing. The diff would be empty for a reason \
+                 unrelated to either client, and an `agrees` claim would pass without the \
+                 subject ever being exercised."
+            ));
+        }
         // An unknown opt-in path must fail HERE, loudly, before a single command runs.
         // Left to diff time it would compare nothing while looking like it compared
         // something — the vacuous pass this whole harness exists to make impossible.
@@ -158,13 +184,8 @@ impl Scenario {
             also_compare: self.also_compare.clone(),
         }
         .validate()?;
-        for want in &self.compare {
-            if !self.runs.iter().any(|r| &r.name == want) {
-                return Err(format!(
-                    "`compare` names run `{want}`, which is not defined"
-                ));
-            }
-        }
+        // (`compare` naming an undefined run is caught by `find` above.)
+
         // Every step must name a role the scenario declares, and every run must bind
         // every role. A step whose role is unbound would silently never execute.
         let mut ids = std::collections::HashSet::new();
@@ -178,6 +199,20 @@ impl Scenario {
                         "step `{}` names role `{role}`, which is not in `roles`",
                         step.id
                     ));
+                }
+            }
+
+            // Parse every command NOW, and check every byte-string argument. A command
+            // that only fails to parse mid-run wastes a cluster round trip; a malformed
+            // base64 argument is worse than that — it decodes to EMPTY bytes, both
+            // drivers agree on the empty key, and the ledger certifies a scenario nobody
+            // wrote. (`sleep` is the runner's own op and is not a driver command.)
+            if step.cmd.get("op").and_then(|o| o.as_str()) != Some("sleep") {
+                let cmd: parity_proto::Command = serde_json::from_value(step.cmd.clone())
+                    .map_err(|e| format!("step `{}`: bad command: {e}", step.id))?;
+                for arg in cmd.args() {
+                    arg.validate()
+                        .map_err(|e| format!("step `{}`: {e}", step.id))?;
                 }
             }
         }
@@ -246,6 +281,52 @@ mod tests {
             runs,
         );
         assert!(parse(&s).unwrap_err().contains("does not bind role"));
+    }
+
+    #[test]
+    fn comparing_an_undefined_run_errors_rather_than_panics() {
+        // The binding check looks these up; a missing run must be REPORTED, not unwrapped.
+        let s = scenario_json(
+            r#"["oracle","ghost"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            RUNS,
+        );
+        let err = parse(&s).unwrap_err();
+        assert!(
+            err.contains("ghost") && err.contains("not defined"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn malformed_base64_in_a_scenario_is_rejected() {
+        // A bad b64 decoded to EMPTY bytes, so both drivers would agree on a prefix-only
+        // key and the ledger would certify a scenario nobody wrote — a green for a test
+        // that never happened. A typo must be loud.
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"get","session":"t","key":{"b64":"!!!"}}}]"#,
+            RUNS,
+        );
+        let err = parse(&s).unwrap_err();
+        assert!(err.contains("base64"), "{err}");
+    }
+
+    #[test]
+    fn two_runs_with_identical_bindings_cannot_be_compared() {
+        // Distinct NAMES are not enough: two all-Go runs contrast nothing, so an
+        // `agrees` claim would pass without client-rust ever being exercised.
+        let runs = r#"[{"name":"oracle","bind":{"r":"go"}},{"name":"subject","bind":{"r":"go"}}]"#;
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            runs,
+        );
+        let err = parse(&s).unwrap_err();
+        assert!(err.contains("contrasts nothing"), "{err}");
     }
 
     #[test]
