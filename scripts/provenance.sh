@@ -74,7 +74,7 @@ if [ -f go/go.mod ] && command -v go >/dev/null 2>&1; then
 fi
 
 if [ -z "$go_resolved" ]; then
-  # No Go module yet, or no toolchain. Record the pin and say plainly that it is
+  # No Go module, or no toolchain. Record the pin and say plainly that it is
   # unverified — never let an absent check read like a passed one.
   go_resolved="$GO_VER_PIN"
   go_verified=false
@@ -82,10 +82,20 @@ else
   go_verified=true
 fi
 
+# AN UNVERIFIED ORACLE IS NOT AN ON-PIN ORACLE.
+#
+# This once copied the pinned version into `go_resolved` and left `matches_pin=true`,
+# so a strict run with no Go toolchain recorded a perfectly on-pin-looking oracle it
+# had never actually looked at. That is the absent-check-reads-as-a-pass failure this
+# whole file exists to prevent, sitting inside the file itself.
+#
+# check-pins.sh already says it: "an unverifiable invariant is not a satisfied one."
 go_on_pin=true
 if [ "$go_verified" = true ]; then
   [ "$go_resolved" = "$GO_VER_PIN" ] || go_on_pin=false
   [ "$go_replaced" = "false" ] || go_on_pin=false
+else
+  go_on_pin=false
 fi
 
 # ── The CLUSTER's provenance ─────────────────────────────────────────────────
@@ -228,7 +238,9 @@ fi
 # stray go.work — silently swaps the pinned, content-addressed oracle for a working
 # tree someone can change, and every parity claim settled against it is void.
 if [ "$go_on_pin" = false ]; then
-  if [ "$go_replaced" = true ]; then
+  if [ "$go_verified" = false ]; then
+    why="the oracle could not be verified (no go/go.mod, or no go toolchain), so which client-go would run is unknown"
+  elif [ "$go_replaced" = true ]; then
     why="client-go is REPLACED — the oracle is a local tree, not the pinned module"
   else
     why="client-go resolved to $go_resolved, but the pin names $GO_VER_PIN"

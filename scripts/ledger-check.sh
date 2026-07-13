@@ -121,20 +121,47 @@ PY
 # the Go driver fills from runtime/debug.ReadBuildInfo() — including whether the module
 # was `replace`d. pins.toml says "an oracle you can accidentally edit is not an oracle";
 # this is where that stops being a comment.
-python3 - "$PINS" <<'PY' || exit 2
-import json, glob, pathlib, sys, tomllib
+#
+# THE TRACES ARE REQUIRED, NOT MERELY INSPECTED IF PRESENT. A loop over a missing or
+# empty results/traces/ would perform zero checks and exit happily — so deleting the
+# traces (or keeping only the divergence artifacts) would have SKIPPED the one proof of
+# which client-go binary actually ran, and the skip would have looked like a pass. An
+# absent check must never read as a satisfied one, so every adjudicated scenario must
+# produce the traces its ledger entry depends on, and each must carry a Go binding.
+python3 - "$PINS" "$LEDGER" <<'PY' || exit 2
+import json, pathlib, sys, tomllib
+
 pins = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
+ledger = tomllib.loads(pathlib.Path(sys.argv[2]).read_text())
 want = pins["client_go"]["version"]
-for f in sorted(glob.glob("results/traces/*.json")):
-    t = json.loads(pathlib.Path(f).read_text())
-    for rb in t.get("roles", []):
-        c = rb["hello"]["client"]
-        if rb["driver"] != "go":
-            continue
-        if c.get("replaced"):
-            sys.exit(f"REFUSING: {f}: the go driver ran against a REPLACED client-go ({c['version']}).")
-        if c["version"] != want:
-            sys.exit(f"REFUSING: {f}: the go driver linked client-go {c['version']}, but the pin names {want}.")
+
+def refuse(why):
+    sys.exit(f"REFUSING TO SETTLE THE LEDGER: {why}")
+
+for gap in ledger.get("gap", []):
+    scen_path = pathlib.Path(gap["scenario"])
+    scen = json.loads(scen_path.read_text())
+    name = scen["name"]
+
+    # Exactly the runs this gap's verdict is computed from.
+    for run in scen["compare"]:
+        f = pathlib.Path(f"results/traces/{name}.{run}.json")
+        if not f.exists():
+            refuse(f"{gap['id']}: {f} is missing. The verdict is computed from these traces, "
+                   "and without them the oracle's identity is unproven — an absence is not an answer.")
+
+        t = json.loads(f.read_text())
+        go_bindings = [rb for rb in t.get("roles", []) if rb["driver"] == "go"]
+        if not go_bindings:
+            refuse(f"{gap['id']}: {f} has no `go` role, so nothing attests which client-go ran.")
+
+        for rb in go_bindings:
+            c = rb["hello"]["client"]
+            if c.get("replaced"):
+                refuse(f"{f}: the go driver ran against a REPLACED client-go ({c['version']}) — "
+                       "an oracle you can edit is not an oracle.")
+            if c["version"] != want:
+                refuse(f"{f}: the go driver linked client-go {c['version']}, but the pin names {want}.")
 PY
 
 # ── 3. THE VERDICT ───────────────────────────────────────────────────────────────────

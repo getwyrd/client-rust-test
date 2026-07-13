@@ -131,6 +131,26 @@ impl Scenario {
                 self.compare
             ));
         }
+        // A scenario comparing a run WITH ITSELF diffs one trace against itself, which is
+        // empty by construction. For an `expect = "agrees"` ledger entry that is a free
+        // green: the claim holds without the subject having been exercised at all. A
+        // comparison that cannot fail is not a comparison.
+        if self.compare[0] == self.compare[1] {
+            return Err(format!(
+                "`compare` names the run `{}` twice. Diffing a run against itself is empty \
+                 by construction — it would pass an `agrees` claim without ever exercising \
+                 the subject.",
+                self.compare[0]
+            ));
+        }
+        // Two runs sharing a name would make `compare` ambiguous and let the wrong trace
+        // be adjudicated.
+        let mut seen = std::collections::HashSet::new();
+        for run in &self.runs {
+            if !seen.insert(&run.name) {
+                return Err(format!("duplicate run name `{}`", run.name));
+            }
+        }
         // An unknown opt-in path must fail HERE, loudly, before a single command runs.
         // Left to diff time it would compare nothing while looking like it compared
         // something — the vacuous pass this whole harness exists to make impossible.
@@ -226,6 +246,32 @@ mod tests {
             runs,
         );
         assert!(parse(&s).unwrap_err().contains("does not bind role"));
+    }
+
+    #[test]
+    fn comparing_a_run_with_itself_is_rejected() {
+        // A self-comparison diffs a trace against itself: empty by construction. For an
+        // `expect = "agrees"` claim that is a free green — the claim would hold without
+        // the subject ever being run. A comparison that cannot fail is not a comparison.
+        let s = scenario_json(
+            r#"["oracle","oracle"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            RUNS,
+        );
+        assert!(parse(&s).unwrap_err().contains("twice"));
+    }
+
+    #[test]
+    fn duplicate_run_names_are_rejected() {
+        let runs = r#"[{"name":"oracle","bind":{"r":"go"}},{"name":"oracle","bind":{"r":"rust"}}]"#;
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"hello"}}]"#,
+            runs,
+        );
+        assert!(parse(&s).is_err());
     }
 
     #[test]
