@@ -417,10 +417,13 @@ Harness prerequisites this roadmap imposes (themselves pin-stated):
 ## 9. Upstream engagement
 
 1. **Answer #506** with §2 and the phase structure — it has waited eight months.
-2. **File what is missing**: typed error taxonomy (5.1); lock-wait control (5.2, or
-   widen #483); the async-commit wrong-commit-ts bug (5.3); service GC safepoints
-   (5.8); replica/stale read umbrella (5.4); a TiKV/PD version-support policy (§0);
-   the MSRV/edition policy question (W4); the no-importable-probes finding (§6).
+2. **File what is missing** — every MUST violation first: the async-commit
+   wrong-commit-ts bug (5.3); the RE-2 retry misclassification (`ServerIsBusy`/
+   `MaxTimestampNotSynced` surfaced to callers instead of backed off and retried —
+   §6, [client-rules.md](client-rules.md) RE-2); service GC safepoints (5.8). Then:
+   typed error taxonomy (5.1); lock-wait control (5.2, or widen #483); replica/stale
+   read umbrella (5.4); a TiKV/PD version-support policy (§0); the MSRV/edition
+   policy question (W4); the no-importable-probes finding (§6).
 3. **Close or update the stale**: #330, #375, #373, #370 (shipped: CAS/TTL), #500
    (fixed by #501; issue left open), #363 (superseded by the Phase-4 batch design).
    Leave #299 open — the passive cache exists, but the reload/TTL substance of the
