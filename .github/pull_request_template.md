@@ -4,10 +4,11 @@
 
 ## Kind of change
 
-- [ ] Gate/harness code (`src/`, `tests/`)
+- [ ] Gate/harness code (`crates/`, `go/`)
+- [ ] Scenario / ledger claim (`scenarios/`, `ledger.toml`)
 - [ ] New or updated finding (`findings/`)
-- [ ] Cluster / tooling (`cluster/`, `Makefile`)
-- [ ] Docs (`README.md`)
+- [ ] Cluster / tooling (`cluster/`, `Makefile`, `scripts/`)
+- [ ] Docs (`README.md`, `docs/`)
 
 ## Checklist
 

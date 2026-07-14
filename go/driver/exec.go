@@ -8,10 +8,13 @@ import (
 	"os"
 	"strings"
 
+	"github.com/tikv/client-go/v2/config"
 	"github.com/tikv/client-go/v2/oracle"
+	"github.com/tikv/client-go/v2/rawkv"
 	"github.com/tikv/client-go/v2/tikv"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 )
 
@@ -68,8 +71,9 @@ func (k *KeyArg) Bytes() []byte {
 // Go clients cannot cleanly coexist in one process. Making the process boundary the
 // role boundary sidesteps that entirely.
 type Driver struct {
-	clients map[string]*txnkv.Client
-	txns    map[string]*transaction.KVTxn
+	clients    map[string]*txnkv.Client
+	rawClients map[string]*rawkv.Client
+	txns       map[string]*transaction.KVTxn
 	// The committer a prewrite_only left mid-2PC, so `abandon` can drop it without
 	// cleanup — that residue IS the state under test.
 	committers map[string]*transaction.CommitterProbe
@@ -78,6 +82,7 @@ type Driver struct {
 func NewDriver() *Driver {
 	return &Driver{
 		clients:    map[string]*txnkv.Client{},
+		rawClients: map[string]*rawkv.Client{},
 		txns:       map[string]*transaction.KVTxn{},
 		committers: map[string]*transaction.CommitterProbe{},
 	}
@@ -85,6 +90,9 @@ func NewDriver() *Driver {
 
 func (d *Driver) Close() {
 	for _, c := range d.clients {
+		_ = c.Close()
+	}
+	for _, c := range d.rawClients {
 		_ = c.Close()
 	}
 }
@@ -125,8 +133,10 @@ func pdAddrs() []string {
 // The honest cost: any gap that lives specifically IN the router path is invisible to
 // this harness. That is a real limitation and it belongs in the ledger's scope notes,
 // not buried here.
-func disableRouterClient(cli *txnkv.Client) error {
-	if err := cli.GetPDClient().UpdateOption(opt.EnableRouterClient, false); err != nil {
+// Takes the PD client rather than a wrapper so the same declared deviation applies to
+// every client kind this driver opens (txn and raw both dial PD).
+func disableRouterClient(pdc pd.Client) error {
+	if err := pdc.UpdateOption(opt.EnableRouterClient, false); err != nil {
 		return fmt.Errorf("cannot disable the PD router client: %w", err)
 	}
 	return nil
@@ -144,7 +154,7 @@ func (d *Driver) Execute(cmd Command) Response {
 		if err != nil {
 			return Response{Observation: driverError(fmt.Sprintf("open_client: %v", err))}
 		}
-		if err := disableRouterClient(cli); err != nil {
+		if err := disableRouterClient(cli.GetPDClient()); err != nil {
 			return Response{Observation: driverError(fmt.Sprintf("open_client: %v", err))}
 		}
 		d.clients[cmd.Name] = cli
@@ -267,6 +277,46 @@ func (d *Driver) Execute(cmd Command) Response {
 		delete(d.committers, cmd.Session)
 		return Response{Observation: ok()}
 
+	case "open_raw_client":
+		// Same PD-version deviation as open_client: the raw client dials PD too,
+		// and the pinned PD (v8.5.5) has no QueryRegion. Declared in hello.config.
+		cli, err := rawkv.NewClient(ctx, pdAddrs(), config.Security{})
+		if err != nil {
+			return Response{Observation: driverError(fmt.Sprintf("open_raw_client: %v", err))}
+		}
+		if err := disableRouterClient(cli.GetPDClient()); err != nil {
+			return Response{Observation: driverError(fmt.Sprintf("open_raw_client: %v", err))}
+		}
+		d.rawClients[cmd.Name] = cli
+		return Response{Observation: ok()}
+
+	case "raw_put":
+		cli, found := d.rawClients[cmd.Client]
+		if !found {
+			return Response{Observation: driverError("raw_put: no such raw client " + cmd.Client)}
+		}
+		if err := cli.Put(ctx, cmd.Key.Bytes(), cmd.Value.Bytes()); err != nil {
+			return Response{Observation: classify(err)}
+		}
+		return Response{Observation: ok()}
+
+	case "raw_checksum":
+		// THE ORACLE'S HALF OF G-0002. Server-side crc64 over [start, end)
+		// (kvrpcpb.RawChecksumRequest). client-rust has no such request and its
+		// driver answers `unsupported` — `ok` versus `unsupported` IS the claim.
+		// The numbers ride along as EVIDENCE ONLY: crc64/total_bytes cover the key
+		// bytes, prefix included, so they legitimately differ between the two runs
+		// of one comparison and are never projected (see parity-proto).
+		cli, found := d.rawClients[cmd.Client]
+		if !found {
+			return Response{Observation: driverError("raw_checksum: no such raw client " + cmd.Client)}
+		}
+		sum, err := cli.Checksum(ctx, cmd.Start.Bytes(), cmd.End.Bytes())
+		if err != nil {
+			return Response{Observation: classify(err)}
+		}
+		return Response{Observation: ok().withChecksum(sum)}
+
 	default:
 		return Response{Observation: driverError("unknown op: " + cmd.Op)}
 	}
@@ -288,6 +338,15 @@ func (o *Observation) withValue(v []byte) *Observation {
 
 func (o *Observation) withLocks(l []Lock) *Observation {
 	o.Locks = l
+	return o
+}
+
+func (o *Observation) withChecksum(sum rawkv.RawChecksum) *Observation {
+	o.Checksum = &ChecksumObs{
+		Crc64Xor:   sum.Crc64Xor,
+		TotalKvs:   sum.TotalKvs,
+		TotalBytes: sum.TotalBytes,
+	}
 	return o
 }
 

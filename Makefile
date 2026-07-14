@@ -150,6 +150,21 @@ cluster-down: cluster/images.env
 cluster-logs: cluster/images.env
 	$(COMPOSE) logs --tail 100
 
+# ── The 3-store profile ────────────────────────────────────────────────────────────
+# Three TiKV stores, three replicas per region (cluster/pd-3store.toml) — the harness
+# prerequisite for replica/stale-read scenarios (docs/parity-roadmap.md §5.4/§8).
+# MUTUALLY EXCLUSIVE with the single-node profile: same host ports. `make cluster-down`
+# first. No scenario uses this profile yet; it exists so 5.4's scenarios have somewhere
+# to run, and so its bring-up is verified before it is needed.
+COMPOSE_3STORE := docker compose --env-file cluster/images.env -f cluster/docker-compose-3store.yml
+
+cluster-up-3store: cluster/images.env
+	$(COMPOSE_3STORE) up -d
+	COMPOSE_FILE=cluster/docker-compose-3store.yml ./cluster/wait-ready.sh 3
+
+cluster-down-3store: cluster/images.env
+	$(COMPOSE_3STORE) down -v
+
 clean:
 	cargo clean
 	rm -rf results cluster/images.env

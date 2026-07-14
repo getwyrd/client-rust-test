@@ -111,6 +111,39 @@ pub enum Command {
     Abandon {
         session: String,
     },
+
+    /// Open a RAW-mode client against `$PD_ADDRS`.
+    ///
+    /// Raw clients get their own namespace: raw and transactional data are different
+    /// worlds (kvrpcpb's APIVersion comment: V1 "is not safe to use RawKV along with
+    /// the others"), and the harness keeps them apart BY CONSTRUCTION — every key
+    /// lives under its run's unique prefix and no scenario mixes raw and txn ops on
+    /// the same keys. Scenarios run serially, so raw traffic never interleaves with a
+    /// transactional scenario's writes.
+    OpenRawClient {
+        name: String,
+    },
+
+    /// A raw, non-transactional put.
+    RawPut {
+        client: String,
+        key: KeyArg,
+        value: KeyArg,
+    },
+
+    /// Checksum a raw key range `[start, end)` — crc64_xor / total_kvs / total_bytes,
+    /// computed SERVER-side (`kvrpcpb.RawChecksumRequest`).
+    ///
+    /// THE FIRST CAPABILITY CLAIM (G-0002). client-go implements it
+    /// (`rawkv.Checksum`); client-rust has no such request type at all and answers
+    /// `unsupported` — which is a real, comparable observation, not a failure. The
+    /// driver must NOT emulate it (scan + hash client-side would checksum different
+    /// bytes under different semantics and manufacture agreement out of a workaround).
+    RawChecksum {
+        client: String,
+        start: KeyArg,
+        end: KeyArg,
+    },
 }
 
 impl Command {
@@ -120,9 +153,13 @@ impl Command {
     /// dispatched.
     pub fn args(&self) -> Vec<&KeyArg> {
         match self {
-            Command::Put { key, value, .. } => vec![key, value],
+            Command::Put { key, value, .. } | Command::RawPut { key, value, .. } => {
+                vec![key, value]
+            }
             Command::Get { key, .. } | Command::SnapshotGet { key, .. } => vec![key],
-            Command::ScanLocks { start, end, .. } => vec![start, end],
+            Command::ScanLocks { start, end, .. } | Command::RawChecksum { start, end, .. } => {
+                vec![start, end]
+            }
             Command::PrewriteOnly { primary, keys, .. } => {
                 let mut v = vec![primary];
                 v.extend(keys.iter());
@@ -131,6 +168,7 @@ impl Command {
             Command::Hello
             | Command::OpenClient { .. }
             | Command::CloseClient { .. }
+            | Command::OpenRawClient { .. }
             | Command::Begin { .. }
             | Command::Commit { .. }
             | Command::Rollback { .. }
@@ -316,6 +354,25 @@ mod tests {
             },
             Command::Abandon {
                 session: "t".to_owned(),
+            },
+            Command::OpenRawClient {
+                name: "r".to_owned(),
+            },
+            Command::RawPut {
+                client: "r".to_owned(),
+                key: KeyArg::Utf8 {
+                    s: "{P}k1".to_owned(),
+                },
+                value: KeyArg::Utf8 { s: "v1".to_owned() },
+            },
+            Command::RawChecksum {
+                client: "r".to_owned(),
+                start: KeyArg::Utf8 {
+                    s: "{P}".to_owned(),
+                },
+                end: KeyArg::Utf8 {
+                    s: "{P}~".to_owned(),
+                },
             },
         ];
         for c in cases {

@@ -138,3 +138,59 @@ step    = "reader-locks-after"
 path    = "locks"
 oracle  = ""
 subject = "key={P}z-secondary primary={P}a-primary kind=put ttl=positive"
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# G-0002 — RawKV Checksum does not exist in client-rust.
+#
+# THE FIRST CAPABILITY CLAIM: the gap is not misbehaviour, it is ABSENCE. client-go
+# serves rawkv.Checksum (a server-side crc64 over a range, kvrpcpb.RawChecksumRequest);
+# client-rust has no such request type in its plan layer at all (rules doc RAW-4;
+# roadmap §5.6). The subject's driver answers `unsupported` — a first-class, comparable
+# observation — and MUST NOT emulate the feature: a client-side scan-and-hash would
+# checksum different bytes under different semantics and manufacture agreement out of a
+# workaround.
+#
+# The oracle's checksum numbers (crc64_xor / total_kvs / total_bytes) are in its trace
+# as EVIDENCE ONLY — they cover the key bytes, run prefix included, so they legitimately
+# differ between the two runs of this comparison and are never projected. The claim
+# surface is the class, plus the detail the projection surfaces for any `unsupported`.
+#
+# Not filed upstream yet — roadmap §9 queues the filing; this entry gets the issue URL
+# when it exists. The day client-rust gains raw checksum, XCONVERGE fires and this entry
+# is re-stated as an `expect = "agrees"` regression guard.
+# ══════════════════════════════════════════════════════════════════════════════════════
+[[gap]]
+id     = "G-0002"
+slug   = "raw-checksum-unsupported"
+kind   = "capability"
+area   = "raw.checksum"
+status = "OPEN"
+
+title = "RawKV Checksum: client-go computes a server-side crc64 over a range; client-rust has no such request"
+
+expectation = """
+Asked to checksum a raw key range, client-go answers ok (crc64_xor / total_kvs /
+total_bytes from kvrpcpb.RawChecksumRequest). client-rust exposes no raw checksum
+anywhere in its API, so its driver answers `unsupported` rather than emulating one.
+The two rows below are the complete projected difference: the class itself, and the
+`unsupported.detail` field the projection surfaces so a capability gap is legible in
+the diff rather than hidden behind a bare tag.
+"""
+
+scenario = "scenarios/raw-checksum.json"
+expect   = "diverges"
+
+roadmap = "docs/parity-roadmap.md §5.6"
+rules   = "docs/client-rules.md RAW-4"
+
+[[gap.divergence]]
+step    = "checker-checksum"
+path    = "class"
+oracle  = "ok"
+subject = "unsupported"
+
+[[gap.divergence]]
+step    = "checker-checksum"
+path    = "unsupported.detail"
+oracle  = "<step absent>"
+subject = "client-rust has no raw checksum: tikv-client implements no RawChecksum request. client-go's rawkv.Checksum returns crc64_xor/total_kvs/total_bytes computed server-side. The driver does NOT emulate it: the gap is the finding (G-0002)."

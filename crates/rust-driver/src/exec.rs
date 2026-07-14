@@ -45,6 +45,7 @@ impl Response {
 
 pub struct Driver {
     clients: HashMap<String, TransactionClient>,
+    raw_clients: HashMap<String, tikv_client::RawClient>,
     txns: HashMap<String, Transaction>,
 }
 
@@ -52,6 +53,7 @@ impl Driver {
     pub fn new() -> Self {
         Self {
             clients: HashMap::new(),
+            raw_clients: HashMap::new(),
             txns: HashMap::new(),
         }
     }
@@ -305,6 +307,44 @@ impl Driver {
                 self.txns.remove(&session);
                 Response::observation(Observation::ok())
             }
+
+            Command::OpenRawClient { name } => {
+                match tikv_client::RawClient::new(harness::pd_addrs()).await {
+                    Ok(c) => {
+                        self.raw_clients.insert(name, c);
+                        Response::observation(Observation::ok())
+                    }
+                    Err(e) => Response::observation(Observation::driver_error(format!(
+                        "open_raw_client: {e}"
+                    ))),
+                }
+            }
+
+            Command::RawPut { client, key, value } => match self.raw_clients.get(&client) {
+                Some(c) => match c.put(key.bytes(), value.bytes()).await {
+                    Ok(()) => Response::observation(Observation::ok()),
+                    Err(e) => Response::observation(classify(&e)),
+                },
+                None => Response::observation(Observation::driver_error(format!(
+                    "raw_put: no such raw client {client}"
+                ))),
+            },
+
+            // ── THE SECOND STATED ASYMMETRY (G-0002) ─────────────────────────
+            // client-go serves `rawkv.Checksum` — a SERVER-side crc64 over the range
+            // (`kvrpcpb.RawChecksumRequest`). client-rust has no such request type in
+            // its plan layer at all (rules doc RAW-4; roadmap §5.6).
+            //
+            // The driver does NOT emulate it. A scan-and-hash would checksum
+            // different bytes under different semantics (client-side, racing writes,
+            // no total_bytes accounting) and manufacture agreement out of a
+            // workaround — `unsupported` is the honest, comparable answer.
+            Command::RawChecksum { .. } => Response::observation(Observation::unsupported(
+                "client-rust has no raw checksum: tikv-client implements no RawChecksum \
+                 request. client-go's rawkv.Checksum returns crc64_xor/total_kvs/\
+                 total_bytes computed server-side. The driver does NOT emulate it: the \
+                 gap is the finding (G-0002).",
+            )),
         }
     }
 }

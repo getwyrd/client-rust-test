@@ -1,0 +1,41 @@
+{
+  "schema": "parity-scenario/v1",
+  "name": "raw-checksum",
+  "gap": "G-0002",
+  "doc": "THE FIRST CAPABILITY CLAIM: raw Checksum exists in client-go and not in client-rust.\n\nclient-go serves rawkv.Checksum -- a SERVER-side crc64 over a key range\n(kvrpcpb.RawChecksumRequest), returning crc64_xor / total_kvs / total_bytes. client-rust\nhas no such request type anywhere in its plan layer (rules doc RAW-4; roadmap 5.6). Its\ndriver answers `unsupported`, which is a first-class, comparable observation -- the\ndriver must NOT emulate the feature (a client-side scan-and-hash would checksum\ndifferent bytes under different semantics and manufacture agreement out of a\nworkaround).\n\nSo the claim surface is the CLASS: oracle `ok`, subject `unsupported`. The oracle's\nchecksum numbers ride along in the trace as evidence only -- crc64_xor and total_bytes\ncover the key bytes, run prefix included, so they legitimately differ between the two\nruns of this comparison and are never projected.\n\nBOTH RUNS SHARE ONE SETUP: client-go writes the same three raw pairs in both; only the\nCHECKER changes. Raw and transactional data are kept apart by construction (every key\nlives under this run's unique prefix; no scenario mixes raw and txn ops on the same\nkeys; scenarios run serially) -- the APIVersion V1 caveat in kvrpcpb is about exactly\nthat mixing.\n\nWhen client-rust gains raw checksum, this diff vanishes, ledger-check fires XCONVERGE,\nand G-0002 is re-stated as an `expect = \"agrees\"` regression guard -- the designed\nlifecycle for a closed gap.",
+
+  "roles": ["writer", "checker"],
+
+  "runs": [
+    { "name": "oracle",  "bind": { "writer": "go", "checker": "go"   } },
+    { "name": "subject", "bind": { "writer": "go", "checker": "rust" } }
+  ],
+  "compare": ["oracle", "subject"],
+
+  "steps": [
+    { "id": "writer-open", "role": "writer",
+      "cmd": { "op": "open_raw_client", "name": "w" } },
+
+    { "id": "writer-put-1", "role": "writer",
+      "why": "Seed the range so the oracle's checksum is over something: an empty-range checksum would be a weaker witness that the capability actually ran.",
+      "cmd": { "op": "raw_put", "client": "w",
+               "key": { "s": "{P}k1" }, "value": { "s": "value-one" } } },
+
+    { "id": "writer-put-2", "role": "writer",
+      "cmd": { "op": "raw_put", "client": "w",
+               "key": { "s": "{P}k2" }, "value": { "s": "value-two" } } },
+
+    { "id": "writer-put-3", "role": "writer",
+      "cmd": { "op": "raw_put", "client": "w",
+               "key": { "s": "{P}k3" }, "value": { "s": "value-three" } } },
+
+    { "id": "checker-open", "role": "checker",
+      "cmd": { "op": "open_raw_client", "name": "c" } },
+
+    { "id": "checker-checksum", "role": "checker",
+      "why": "THE CAPABILITY CLAIM. The oracle answers `ok` (with crc64/total_kvs/total_bytes as evidence in the trace); the subject answers `unsupported`. That class difference IS G-0002.",
+      "cmd": { "op": "raw_checksum", "client": "c",
+               "start": { "s": "{P}" },
+               "end":   { "s": "{P}~" } } }
+  ]
+}
