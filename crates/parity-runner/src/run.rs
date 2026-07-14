@@ -151,7 +151,7 @@ pub fn execute(
         // could not resolve it" says nothing at all. A vacuous green is the one
         // outcome worse than a red.
         if let Some(assert) = &step.assert {
-            if let Some(why) = assert.check(&obs) {
+            if let Some(why) = precondition_failure(assert, &obs) {
                 return Ok(Err(Inadmissible {
                     run: run.name.clone(),
                     why: format!("step `{}` precondition failed: {why}", step.id),
@@ -200,6 +200,30 @@ fn cmd_op(cmd: &serde_json::Value) -> String {
         .and_then(|o| o.as_str())
         .unwrap_or("?")
         .to_owned()
+}
+
+/// Evaluate a step's precondition — UNLESS the observation is inadmissible.
+///
+/// An inadmissible observation can neither satisfy nor fail a precondition: it is
+/// evidence of nothing, including evidence about the setup. A `region_error` on the
+/// asserted `scan_locks` step means the CLUSTER moved (a split or a leader change),
+/// and its zero locks say nothing about whether the orphan was manufactured. Checking
+/// the assert against it would report "precondition failed" with `transient` hard-coded
+/// `false` — turning a retryable cluster event into a fatal setup failure and starving
+/// the retry loop in `run_scenario`.
+///
+/// So an inadmissible observation is passed through untouched: the end-of-run
+/// admissibility check classifies it as itself (`Trace::inadmissible`), and
+/// `Trace::is_transient` decides whether the run is retried (region error) or fatal
+/// (driver error, unmapped error).
+fn precondition_failure(
+    assert: &crate::scenario::Assert,
+    obs: &parity_proto::Observation,
+) -> Option<String> {
+    if obs.class.inadmissible_reason().is_some() {
+        return None;
+    }
+    assert.check(obs)
 }
 
 /// Namespace every argument of a command under the run's key prefix.
@@ -264,5 +288,45 @@ fn substitute(cmd: &Command, prefix: &str) -> Command {
             end: end.as_key(prefix),
         },
         other => other.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scenario::Assert;
+    use parity_proto::Observation;
+
+    fn want_one_lock() -> Assert {
+        Assert {
+            lock_count: Some(1),
+            class: None,
+        }
+    }
+
+    #[test]
+    fn a_region_error_is_not_a_failed_precondition() {
+        // THE BUG THIS GUARDS. A region_error during the asserted scan_locks carries
+        // zero locks; checking `lock_count: 1` against it reported "setup failed"
+        // (fatal) instead of "the cluster moved" (transient, retried).
+        let obs = Observation::new(parity_proto::Class::RegionError);
+        assert_eq!(precondition_failure(&want_one_lock(), &obs), None);
+    }
+
+    #[test]
+    fn a_driver_error_is_not_a_failed_precondition_either() {
+        // Also inadmissible — and the end-of-run classification keeps it FATAL
+        // (`is_transient` is false for driver_error), so skipping the assert here
+        // loses nothing: the run still dies, attributed to the right cause.
+        let obs = Observation::driver_error("boom");
+        assert_eq!(precondition_failure(&want_one_lock(), &obs), None);
+    }
+
+    #[test]
+    fn an_admissible_observation_still_faces_the_assert() {
+        // The gate itself must keep gating: an OK scan that saw no locks IS a failed
+        // setup, and must stay fatal.
+        let obs = Observation::ok();
+        assert!(precondition_failure(&want_one_lock(), &obs).is_some());
     }
 }
