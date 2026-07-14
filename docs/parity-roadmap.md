@@ -178,11 +178,14 @@ dev-deps (clap 4, serial_test 3, reqwest 0.13, env_logger 0.11, rstest 0.26).
 Migrate edition 2021→2024, and **decouple MSRV from the dev toolchain**: keep
 `rust-toolchain.toml` current for development, set `rust-version` to something a
 library's consumers can meet, and **land the MSRV CI job first** so the floor is
-discovered rather than asserted. The source itself needs nothing newer than ~1.82
-(#530's only feature use is `iter::repeat_n`); the real floor will be
-`max(1.85 — the edition-2024 minimum, whatever tonic 0.14/prost 0.14/tokio require)`,
-so 1.85 is the goal, contingent on the W2/W3 dependency set. Replace `lazy_static`
-with `LazyLock`, retire `async-recursion` and `take_mut` in the same pass.
+tested rather than asserted. The source itself needs nothing newer than ~1.82
+(#530's only feature use is `iter::repeat_n`) and the edition-2024 minimum is 1.85 —
+but the floor is set by W2's dependency set, and that number is already known:
+`tonic` 0.14.6 and `tonic-prost-build` 0.14.6 both declare `rust-version = 1.88`
+(prost 0.14.4: 1.85). So the working target is **1.88** once W2 lands — five stable
+releases below the current 1.93 pin and a reasonable library MSRV — with the CI job
+reporting the exact floor as dependencies move. Replace `lazy_static` with
+`LazyLock`, retire `async-recursion` and `take_mut` in the same pass.
 
 **W5 — CI & release hygiene** · risk: nil
 `arduino/setup-protoc@v1`→v3; the MSRV job from W4; a CHANGELOG; a tagged-release
