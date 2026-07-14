@@ -1,0 +1,13 @@
+# Three-store cluster: full replication (three replicas per region), so scenarios
+# that route reads to FOLLOWERS have followers to route to — the harness prerequisite
+# roadmap §5.4 names for the replica/stale-read scenarios.
+#
+# Same merge thresholds as pd.toml (from client-rust CI): the split regions the
+# tikv.toml thresholds create must not immediately merge back.
+
+[replication]
+max-replicas = 3
+
+[schedule]
+max-merge-region-size = 1
+max-merge-region-keys = 3

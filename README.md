@@ -112,7 +112,7 @@ wyrd/
     │   ├── rust-driver/    # drives tikv-client  (the subject)
     │   └── parity-runner/  # the comparator. Links NEITHER client, on purpose.
     ├── go/                 # drives client-go (the ORACLE), at the pinned module
-    ├── scenarios/          # one scenario, two clients, one diff
+    ├── scenarios/          # one scenario per claim, two clients, one diff
     ├── cluster/            # throwaway single-node PD + TiKV (digest-pinned)
     ├── scripts/            # pins, provenance, the verdicts
     ├── findings/           # the harness's output: write-ups, repros, evidence

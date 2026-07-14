@@ -33,8 +33,11 @@ import (
 	"github.com/tikv/client-go/v2/txnkv/txnlock"
 )
 
-// Observation is one command's result. Mirrors parity-proto's Rust type exactly; the
-// golden corpus in crates/parity-proto/testdata asserts both halves agree.
+// Observation is one command's result. Mirrors parity-proto's Rust type exactly —
+// by hand: there is no generated binding and no golden corpus (yet), so the two
+// halves are kept in lockstep by review. A field added on one side without the other
+// serializes as absent and the projection treats absent as a fact, so drift here is
+// not cosmetic.
 type Observation struct {
 	Class string `json:"class"`
 
@@ -62,6 +65,18 @@ type Observation struct {
 
 	Proto  map[string]any `json:"proto,omitempty"`
 	Native *Native        `json:"native,omitempty"`
+
+	// The result of a raw checksum, when this client could compute one. EVIDENCE
+	// ONLY, never projected: crc64_xor/total_bytes cover the key bytes — run prefix
+	// included — so they legitimately differ between the two runs of one comparison.
+	Checksum *ChecksumObs `json:"checksum,omitempty"`
+}
+
+// ChecksumObs mirrors parity_proto::ChecksumObs (kvrpcpb.RawChecksumResponse, verbatim).
+type ChecksumObs struct {
+	Crc64Xor   uint64 `json:"crc64_xor"`
+	TotalKvs   uint64 `json:"total_kvs"`
+	TotalBytes uint64 `json:"total_bytes"`
 }
 
 type Bytes struct {

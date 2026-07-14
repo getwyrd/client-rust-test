@@ -132,7 +132,7 @@ contract sorts them into three classes, and the class dictates the reaction.
 | RAW-1 | MUST | No RawKV alongside TxnKV in API V1: *"`V1` … is not safe to use RawKV along with the others."* V2's keyspace prefixes (`r`/`x`) are what makes coexistence safe. | `kvrpcpb.proto` APIVersion enum comment (verbatim) | ✅ V2 codecs (`request/keyspace.rs`); V1 carries the same caveat as the oracle |
 | RAW-2 | MUST | A V1 client never sends V1TTL: *"V1 client should always send `V1`."* | `kvrpcpb.proto` APIVersion V1TTL comment | ✅ (no V1TTL mode at all — see RAW-4) |
 | RAW-3 | MUST | Atomic operations (CAS) only in atomic mode, and atomic/non-atomic writes are not mixed on the same keys — CAS's guarantee evaporates otherwise. | oracle `rawkv.go:185` SetAtomicForCAS | ✅ `assert_atomic()` guard (`raw/client.rs:691`) |
-| RAW-4 | CAN | TTL, `Checksum`, the V1TTL api-version mode. | oracle `rawkv.go:615,365` | TTL ✅ · Checksum ❌ (roadmap §5.6) · V1TTL mode ❌ |
+| RAW-4 | CAN | TTL, `Checksum`, the V1TTL api-version mode. | oracle `rawkv.go:615,365` | TTL ✅ · Checksum ❌ (**G-0002**, machine-checked; roadmap §5.6) · V1TTL mode ❌ |
 
 ## NET — Transport & identification
 

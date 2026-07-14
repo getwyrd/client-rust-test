@@ -277,8 +277,10 @@ for the oracle's shape). Verify: capability claims.
 
 **5.6 Raw `Checksum`.** The one real RawKV gap (`rawkv/rawkv.go:615`; `CmdRawChecksum`
 absent from `store/request.rs:75-86`). Single request type.
-Verify: `scenarios/raw-checksum.json` — the canonical capability claim: today
-`expect = "diverges"` with `class: oracle=ok / subject=unsupported`; flips on landing.
+Verify: **landed** — `scenarios/raw-checksum.json` + ledger **G-0002**, the canonical
+capability claim (`expect = "diverges"`, `class: oracle=ok / subject=unsupported`,
+declared field-complete with its `unsupported.detail` row). Flips to XCONVERGE the day
+client-rust gains the request.
 
 **5.7 Read-path lock resolution parity.** Re-enable resolve-lock-lite (`requests.rs:229`
 pins `txn_size = MAX` with a "currently disabled" comment; oracle threshold at
@@ -403,12 +405,15 @@ The mechanism exists and has fired in anger (G-0001). Per item:
 Harness prerequisites this roadmap imposes (themselves pin-stated):
 
 0. **the driver protocol grows with every item**: the parity `Command` enum
-   (`crates/parity-proto/src/command.rs`) has exactly the 12 commands the first
-   scenario needed — none of the §5 scenarios is expressible yet. Each item's
-   verification starts by adding its command(s) to `parity-proto` **and both
-   drivers**; a scenario naming an unknown op fails at load. This is deliberate
-   (drivers stay minimal) but it means "write the scenario" is never the whole cost;
-1. a **3-store cluster profile** in `cluster/` for replica/stale-read scenarios (5.4);
+   (`crates/parity-proto/src/command.rs`) started with exactly the 12 commands the
+   first scenario needed. Each item's verification starts by adding its command(s) to
+   `parity-proto` **and both drivers**; a scenario naming an unknown op fails at load.
+   This is deliberate (drivers stay minimal) but it means "write the scenario" is
+   never the whole cost. First slice landed with G-0002: `open_raw_client`,
+   `raw_put`, `raw_checksum`;
+1. a **3-store cluster profile** in `cluster/` for replica/stale-read scenarios (5.4)
+   — **landed** (`cluster/docker-compose-3store.yml`, `make cluster-up-3store`,
+   3 replicas per region); the scenarios that use it are 5.4's;
 2. a **PD-observation step** for the runner (safepoint checks, 5.8) — consistent with
    the existing rule that PD preconditions belong to the runner, never to drivers;
 3. once upstream probes exist (§6), a Rust orphan-factory so interesting scenarios stop

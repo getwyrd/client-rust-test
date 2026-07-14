@@ -251,6 +251,18 @@ fn substitute(cmd: &Command, prefix: &str) -> Command {
             primary: primary.as_key(prefix),
             keys: keys.iter().map(|k| k.as_key(prefix)).collect(),
         },
+        RawPut { client, key, value } => RawPut {
+            client: client.clone(),
+            key: key.as_key(prefix),
+            value: value.as_value(prefix),
+        },
+        RawChecksum { client, start, end } => RawChecksum {
+            client: client.clone(),
+            // Range bounds are keys: they must bracket THIS run's prefix, or the
+            // checksum would cover the other run's data too.
+            start: start.as_key(prefix),
+            end: end.as_key(prefix),
+        },
         other => other.clone(),
     }
 }

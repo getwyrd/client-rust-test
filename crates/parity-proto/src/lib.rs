@@ -25,6 +25,7 @@ pub use command::KeyArg;
 pub use command::TxnMode;
 pub use command::PROTOCOL_VERSION;
 pub use observation::Bytes;
+pub use observation::ChecksumObs;
 pub use observation::LockObs;
 pub use observation::NativeObs;
 pub use observation::Observation;

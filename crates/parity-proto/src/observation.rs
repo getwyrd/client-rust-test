@@ -87,6 +87,17 @@ pub struct Observation {
     /// printed in a divergence report, so a human can overturn any mapping call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native: Option<NativeObs>,
+
+    /// The result of a raw `checksum`, when the client could compute one. EVIDENCE
+    /// ONLY — never projected, on purpose: `crc64_xor` and `total_bytes` cover the
+    /// KEY BYTES, which include the run's unique prefix, so they legitimately differ
+    /// between the two runs of one comparison. (`total_kvs` alone would compare, but
+    /// one comparable field inside a non-comparable struct is a trap for a future
+    /// claim author.) The claim surface for a checksum is its `class` — `ok` versus
+    /// `unsupported` IS G-0002 — and this struct is what makes the oracle's `ok`
+    /// inspectable rather than bare.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<ChecksumObs>,
 }
 
 impl Observation {
@@ -100,6 +111,7 @@ impl Observation {
             error_count: None,
             proto: None,
             native: None,
+            checksum: None,
         }
     }
 
@@ -156,6 +168,20 @@ impl Observation {
         self.commit_ts = Some(ts);
         self
     }
+
+    pub fn with_checksum(mut self, c: ChecksumObs) -> Self {
+        self.checksum = Some(c);
+        self
+    }
+}
+
+/// What a raw `checksum` returned (`kvrpcpb.RawChecksumResponse`, verbatim).
+/// See [`Observation::checksum`] for why this is recorded but never compared.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChecksumObs {
+    pub crc64_xor: u64,
+    pub total_kvs: u64,
+    pub total_bytes: u64,
 }
 
 /// Opaque bytes on the wire: base64, plus a `utf8` echo when printable.

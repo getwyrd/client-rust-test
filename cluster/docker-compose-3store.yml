@@ -1,0 +1,79 @@
+# Throwaway THREE-store TiKV + PD — the harness prerequisite for replica/stale-read
+# scenarios (docs/parity-roadmap.md §5.4/§8): a follower read needs followers, so this
+# profile runs three TiKV stores and pd-3store.toml raises max-replicas to 3.
+#
+# Everything else deliberately matches the single-node profile in docker-compose.yml:
+# the same digest-pinned images (cluster/images.env, generated from pins.toml), the
+# same tikv.toml split thresholds, the same host networking. Which also means the two
+# profiles are MUTUALLY EXCLUSIVE — they contend for the same host ports (PD 2379,
+# TiKV 2016x). `make cluster-down` before `make cluster-up-3store`, and vice versa.
+#
+#   make cluster-up-3store   # NOT `docker compose up` directly: no images.env
+name: client-rust-test-cluster-3store
+services:
+  pd:
+    image: ${PD_IMAGE:?unset — run via `make cluster-up-3store`, which generates cluster/images.env from pins.toml}
+    network_mode: host
+    command:
+      - --name=pd
+      - --data-dir=/data/pd
+      - --client-urls=http://127.0.0.1:2379
+      - --peer-urls=http://127.0.0.1:2380
+      - --config=/pd.toml
+    volumes:
+      - pd-data:/data
+      - ./pd-3store.toml:/pd.toml:ro
+
+  # Three stores on one host: distinct service ports AND distinct status ports —
+  # TiKV's status server defaults to 20180, so leaving --status-addr unset would make
+  # the second and third stores lose the port race and die at startup.
+  tikv0: &tikv
+    image: ${TIKV_IMAGE:?unset — run via `make cluster-up-3store`, which generates cluster/images.env from pins.toml}
+    network_mode: host
+    # See docker-compose.yml for why this is explicit: TiKV refuses to start without
+    # ~124k file descriptors, and the Docker daemon default differs per machine.
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    command:
+      - --pd-endpoints=127.0.0.1:2379
+      - --addr=127.0.0.1:20160
+      - --status-addr=127.0.0.1:20180
+      - --data-dir=/data/tikv
+      - --config=/tikv.toml
+    volumes:
+      - tikv0-data:/data
+      - ./tikv.toml:/tikv.toml:ro
+    depends_on:
+      - pd
+
+  tikv1:
+    <<: *tikv
+    command:
+      - --pd-endpoints=127.0.0.1:2379
+      - --addr=127.0.0.1:20161
+      - --status-addr=127.0.0.1:20181
+      - --data-dir=/data/tikv
+      - --config=/tikv.toml
+    volumes:
+      - tikv1-data:/data
+      - ./tikv.toml:/tikv.toml:ro
+
+  tikv2:
+    <<: *tikv
+    command:
+      - --pd-endpoints=127.0.0.1:2379
+      - --addr=127.0.0.1:20162
+      - --status-addr=127.0.0.1:20182
+      - --data-dir=/data/tikv
+      - --config=/tikv.toml
+    volumes:
+      - tikv2-data:/data
+      - ./tikv.toml:/tikv.toml:ro
+
+volumes:
+  pd-data: {}
+  tikv0-data: {}
+  tikv1-data: {}
+  tikv2-data: {}
