@@ -116,7 +116,7 @@ wyrd/
     ├── cluster/            # throwaway single-node PD + TiKV (digest-pinned)
     ├── scripts/            # pins, provenance, the verdicts
     ├── findings/           # the harness's output: write-ups, repros, evidence
-    ├── docs/               # the roadmap + the client rules (MUST/SHOULD/CAN)
+    ├── docs/               # the roadmap, the client rules, the upstream issue map
     ├── ledger.toml         # every gap, with a declared expectation
     └── pins.toml           # what is under test — the single source of truth
 ```
