@@ -421,6 +421,10 @@ Harness prerequisites this roadmap imposes (themselves pin-stated):
 
 ## 9. Upstream engagement
 
+The tracker-to-roadmap cross-reference lives in
+[upstream-issue-map.md](upstream-issue-map.md) — it extends §9.3's stale list by five
+issues and converts several of §9.2's filings into revivals of existing issues.
+
 1. **Answer #506** with §2 and the phase structure — it has waited eight months.
 2. **File what is missing** — every MUST violation first: the async-commit
    wrong-commit-ts bug (5.3); the RE-2 retry misclassification (`ServerIsBusy`/
