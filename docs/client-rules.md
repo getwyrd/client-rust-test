@@ -7,7 +7,9 @@ client-rust's `proto/`).
 ## 0. What this is, and where the rules come from
 
 A normative baseline for a TiKV client, in three tiers. The roadmap says *what to build,
-in what order*; this document says *what each gap weighs*.
+in what order*; this document says *what each gap weighs*. For engineering practices learned
+while *submitting* the work (as opposed to what the client must *do*), see
+[review-conventions.md](review-conventions.md).
 
 - **MUST** — violating it can corrupt data, break atomicity or isolation, strand locks,
   wedge GC, or misreport an outcome. A MUST violation is a bug to file upstream
