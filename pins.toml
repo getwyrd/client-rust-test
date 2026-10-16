@@ -42,8 +42,8 @@ rev = "e53837dc6d94f8de4be090571dca0198dc993b9d"
 [client_go]
 module = "github.com/tikv/client-go/v2"
 # Canonical pseudo-version resolved by `go list -m`, not hand-derived.
-version = "v2.0.8-0.20260708122311-01bd8f99f4da"
-rev     = "01bd8f99f4da23c6fc9d671eecc0166c7b6ceb9b"
+version = "v2.0.8-0.20261014135228-56e5933f0069"
+rev     = "56e5933f0069dd390b0327ffc5291eb0a64f1aee"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The cluster.
@@ -61,4 +61,4 @@ tikv_image   = "pingcap/tikv:v8.5.5@sha256:1600c2de7432af1f7f23291dcac13b3f82950
 # ─────────────────────────────────────────────────────────────────────────────
 [toolchain]
 rust = "1.93.0"    # must equal rust-toolchain.toml, and upstream client-rust's MSRV
-go   = "1.25.10"   # must be >= client-go's own `go` directive
+go   = "1.25.14"   # must be >= client-go's own `go` directive

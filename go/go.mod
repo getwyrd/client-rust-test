@@ -13,13 +13,13 @@
 // *tikv.KVStore, which is all the probes require.
 module github.com/getwyrd/client-rust-test/go
 
-go 1.25.10
+go 1.25.14
 
-require github.com/pingcap/kvproto v0.0.0-20260622063236-b41e86365ce0
+require github.com/pingcap/kvproto v0.0.0-20261006010420-121875fd9777
 
 require (
-	github.com/tikv/client-go/v2 v2.0.8-0.20260708122311-01bd8f99f4da
-	github.com/tikv/pd/client v0.0.0-20260708075407-4e05b9d2c2d3
+	github.com/tikv/client-go/v2 v2.0.8-0.20261014135228-56e5933f0069
+	github.com/tikv/pd/client v0.0.0-20260805103528-afa43111d149
 )
 
 require (
@@ -55,14 +55,14 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
-	golang.org/x/net v0.51.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20251202230838-ff82c1b0f217 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
-	google.golang.org/grpc v1.79.3 // indirect
-	google.golang.org/protobuf v1.36.10 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
+	google.golang.org/grpc v1.82.1 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 )
