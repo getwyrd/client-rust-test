@@ -70,9 +70,9 @@ by default, always kept as evidence). Nothing is normalized at capture; the proj
 decides what a given claim looks at. **Canonicalize the question, never the evidence** —
 a projection can be widened later, but evidence discarded at capture is gone.
 
-That layering is not decoration. `G-0001`'s root cause *is* a native-taxonomy bug —
-`check_txn_status` matches `Error::ExtractedErrors` but only ever receives
-`Error::MultipleKeyErrors` — and both map to the same canonical class. A class-only diff
+That layering is not decoration. `G-0001`'s root cause *was* a native-taxonomy bug —
+`check_txn_status` matched `Error::ExtractedErrors` but only ever received
+`Error::MultipleKeyErrors` (until tikv/client-rust#561) — and both map to the same canonical class. A class-only diff
 would call the two clients identical and the bug would be invisible.
 
 `ledger.toml` declares each gap **field by field**, and `scripts/ledger-check.sh`
@@ -189,26 +189,10 @@ State lives in `$PARITY_BROKER_DIR` (default `~/.local/state/parity-broker`).
 > included, and the ledger holds: G-0001 is FIXED and asserted to **agree**, G-0002 still
 > diverges as declared. Confirm the checkout with
 > `git -C ../client-rust describe --tags --always --dirty`. What changed since the
-> previous pin: the orphaned-lock fix landed as tikv/client-rust#561 (our #544 closed as
-> superseded), and the pessimistic-rollback fix as #547.
-
-### History: the verdict at `e53837d`
-
-> Run against an unmodified client-rust checkout; confirm with
-> `git -C ../client-rust describe --tags --always --dirty` (must read
-> `e53837d`, no `-dirty`). The one-line fix that makes `d6` pass lives only in
-> `findings/fix-check-txn-status-wrapper.patch`, never applied to the tree
-> under test.
->
-> **Design principle: the harness relies on client-rust; it carries no
-> workarounds for client-rust bugs.** Where the client is deficient, that is a
-> finding expressed as a **failing test**, fixed in client-rust — not papered
-> over here. So on unfixed `e53837d` the gate is **16 green + `d6` red**: `d6`
-> asserts the *correct* behavior (an orphaned lock must be resolved) and turns
-> green when the #519 fix lands. Verified both ways: **17/17 green** against
-> `e53837d + the fix` (`findings/gate-evidence.txt`,
-> `findings/fix-check-txn-status-wrapper.patch`), where `d6`'s output shows the
-> orphan being resolved after TTL; `d6` red against pristine `e53837d`.
+> previous pin: the orphaned-lock fix landed inside tikv/client-rust#561's `resolve_locks`
+> rework (our #544 closed as superseded), and the pessimistic-rollback fix as #547.
+> Evidence: [`findings/gate-evidence-3408d95.txt`](findings/gate-evidence-3408d95.txt)
+> (full `make verdict` and `make ledger` output at this pin).
 
 **Confirmed working** — the proposal's mapping is implementable as specified:
 
@@ -232,25 +216,28 @@ fixed in client-rust.
    [findings/](findings/txn-not-found-lock-resolution.md)). **Now also stated against
    the oracle**: `scenarios/orphaned-lock-resolution.json` manufactures one orphan with
    client-go's `CommitterProbe` and hands it to *each* client to resolve. client-go's
-   read succeeds and its resolver clears the lock (0 remaining); client-rust's read
-   fails with `MultipleKeyErrors` and the lock is still there (1 remaining). Because
+   read succeeds and its resolver clears the lock (0 remaining); at `e53837d`
+   client-rust's read failed with `MultipleKeyErrors` and the lock stayed (1 remaining),
+   and since `3408d95` the two agree. Because
    both runs share one setup, the divergence is attributable to the **reader alone** —
    which `d6` cannot claim, since it must manufacture the orphan through the public API
    with a region split and a racing txn, and so cannot tell *"I failed to build the
-   orphan"* apart from *"the client failed to resolve it"*. Verified both ways: applying
-   [the fix](findings/fix-check-txn-status-wrapper.patch) makes the divergence vanish
-   entirely, and `ledger-check` then fails with **XCONVERGE**, as it must. A lock on a
+   orphan"* apart from *"the client failed to resolve it"*. Verified both ways at
+   `e53837d`: applying [the fix](findings/fix-check-txn-status-wrapper.patch) made the
+   divergence vanish entirely, and `ledger-check` then failed with **XCONVERGE**, as it had
+   to while G-0001 was declared `diverges` (it is now `agrees`, and that outcome HOLDS). A lock on a
    secondary key whose primary was never written (crash between per-region
    prewrites, or a failed commit's residue) makes the key unreadable **and
    unwritable** forever: `MultipleKeyErrors([KeyError { txn_not_found }])`,
-   unchanged by TTL expiry. The heal path (`rollback_if_not_exist` escalation
-   in `get_txn_status_from_lock`) is dead code: `check_txn_status` matches
-   `Error::ExtractedErrors`, but its plan shape can only deliver the key error
+   unchanged by TTL expiry. At `e53837d` the heal path (`rollback_if_not_exist`
+   escalation in `get_txn_status_from_lock`) was dead code: `check_txn_status` matched
+   `Error::ExtractedErrors`, but its plan shape could only deliver the key error
    as `Error::MultipleKeyErrors` — the sibling call sites with the opposite
-   adapter order are why their identical match arms *do* work. Introduced by
+   adapter order are why their identical match arms *did* work. Introduced by
    `7d80f59` (#519); the pre-#519 resolver recovered this state via legacy
-   `Cleanup`. `d6` asserts the correct behavior (the orphan must be resolved
-   on read after TTL) and so fails until the fix lands; the one-line fix
+   `Cleanup`; fixed by #561, whose wider `resolve_locks` rework includes the same
+   match-arm change. `d6` asserts the correct behavior (the orphan must be resolved
+   on read after TTL), so it failed until the fix landed; the one-line fix
    ([findings/fix-check-txn-status-wrapper.patch](findings/fix-check-txn-status-wrapper.patch))
    makes it pass, validated twice (post-TTL self-heal; 63/63 upstream unit
    tests green). The harness carries **no janitor** — resolving orphaned locks
@@ -279,7 +266,7 @@ fixed in client-rust.
 
    The store here uses the API correctly — `rollback()` after every failed
    commit, skipped on `UndeterminedError` — and relies on **client-rust** to
-   resolve the residue (which, with #543, self-heals on the next read; finding
+   resolve the residue (which, since #561, self-heals on the next read; finding
    1). Complementary to #543 (prevent-at-source vs cure-on-read), no duplicate
    (closest: #528, #235, #313).
 3. **Woken pessimistic lock waiters surface a `WriteConflict` — by-design, not
@@ -303,6 +290,24 @@ fixed in client-rust.
 (A fourth candidate — "`snapshot()` needs explicit `.read_only()` or drops
 panic" — did **not** survive verification: `TransactionClient::snapshot`
 applies `.read_only()` internally, client.rs:230. Retracted.)
+
+### History: the verdict at `e53837d`
+
+> Run against an unmodified client-rust checkout; confirm with
+> `git -C ../client-rust describe --tags --always --dirty` (must read
+> `e53837d`, no `-dirty`). The one-line fix that makes `d6` pass lives only in
+> `findings/fix-check-txn-status-wrapper.patch`, never applied to the tree
+> under test.
+>
+> **Design principle: the harness relies on client-rust; it carries no
+> workarounds for client-rust bugs.** Where the client is deficient, that is a
+> finding expressed as a **failing test**, fixed in client-rust — not papered
+> over here. So on unfixed `e53837d` the gate is **16 green + `d6` red**: `d6`
+> asserts the *correct* behavior (an orphaned lock must be resolved) and turns
+> green when the #519 fix lands. Verified both ways: **17/17 green** against
+> `e53837d + the fix` (`findings/gate-evidence.txt`,
+> `findings/fix-check-txn-status-wrapper.patch`), where `d6`'s output shows the
+> orphan being resolved after TTL; `d6` red against pristine `e53837d`.
 
 ## Prerequisites
 

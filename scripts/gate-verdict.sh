@@ -25,8 +25,8 @@ cd "$(git rev-parse --show-toplevel)"
 # ─── The expected-red table ───────────────────────────────────────────────────
 #   <test-binary>|<test-name>|<why>|<signature of the EXPECTED failure>
 #
-# Each entry asserts the CORRECT behavior and so is red until its fix merges.
-# Both fixes are already filed upstream; when they land, XPASS fires here.
+# Each entry asserts the CORRECT behavior and so is red until its fix merges; when
+# the fix lands, XPASS fires here and the row comes out (as d6 and d7 did at 3408d95).
 #
 # The signature matters. "The test failed" is not evidence that the GAP is still
 # open — the test could have failed on the way to its assertion (d6 panics if it

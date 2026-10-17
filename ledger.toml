@@ -45,8 +45,9 @@ schema = "parity-ledger/v1"
 # G-0001 — An orphaned lock is never resolved.  FIXED upstream — now a regression guard.
 #
 # Filed upstream as tikv/client-rust#543. Our fix PR #544 was superseded by #561
-# ("recover expired async commit locks", 3408d95), which makes the same change in
-# `check_txn_status` and adds an equivalent unit test; #544 and #543 are closed. At the
+# ("recover expired async commit locks", 3408d95): a wider rework of `resolve_locks` that
+# includes #544's match-arm change in `check_txn_status` and an equivalent unit test;
+# #544 and #543 are closed. At the
 # pin 3408d95 the two clients AGREE, so this entry asserts that they keep agreeing.
 # ══════════════════════════════════════════════════════════════════════════════════════
 [[gap]]
@@ -78,36 +79,22 @@ upstream_issue = "https://github.com/tikv/client-rust/issues/543"
 upstream_pr    = "https://github.com/tikv/client-rust/pull/561"   # #544 closed as superseded
 finding        = "findings/txn-not-found-lock-resolution.md"
 
-# ─── The declared divergence. Anything MORE, or anything DIFFERENT, is a hard failure.
+# ─── What this `agrees` claim compares. Any divergence on these is a NEW GAP.
 #
-# Note what each row buys, because between them they close the loopholes a weaker claim
-# would leave open:
-
-# 1. The read ERRORS instead of succeeding. (`not_found` is the correct answer for the
-#    oracle: the orphaning txn never committed, so resolving it means rolling it back,
-#    and the key is then legitimately absent. The bug is not "the value is missing" —
-#    it is that client-rust cannot read the key AT ALL.)
-
-# 2. THE ROOT CAUSE, IN EVIDENCE. `native.type` is not compared by default — both
-#    clients report the same canonical fact here, so a class-only diff would call them
-#    identical. Opting in (scenario.also_compare) exposes the client's OWN taxonomy, and
-#    `MultipleKeyErrors` is precisely the variant #543 says arrives where the code
-#    expects `ExtractedErrors`. The bug is legible in the trace.
+# Every step's projection compares `class`, `value`, `locks.count`, `locks`,
+# `proto.present` and `proto.type`; the scenario opts `native.type` in too
+# (`also_compare`). So a regression that re-breaks resolution — the read errors again with
+# `MultipleKeyErrors` / `txn_not_found`, and the lock stays — diverges on class,
+# native.type, proto and locks, and fails loudly.
 #
-#    The oracle side is `<absent>` because client-go's read SUCCEEDS — there is no error,
-#    so there is no error taxonomy to report. (Go's ErrNotExist sentinel is a calling
-#    convention for "key absent", not an error about TiKV, so the driver does not dress
-#    it up as one; see go/driver/observation.go. Otherwise every not_found comparison in
-#    the harness would carry a permanent, meaningless native.type divergence.)
-
-# 3. THE STRONGER HALF: the lock is still THERE. A client that merely read past the
-#    orphan would have left the key unwritable. client-go removes it (asynchronously);
-#    client-rust leaves it forever, unchanged by TTL expiry.
-
-# The two rows below are consequences of (1) — client-rust's error carries a kvproto and
-# client-go's untyped TxnNotFound does not. Declared so that the divergence set is
-# COMPLETE: an undeclared extra divergence is a WRONG DIVERGENCE, and it should be,
-# because it means something changed that we did not predict.
+# Known weakness (getwyrd/client-rust-test#58): the `settle` step waits a fixed 6 s for
+# client-go's ASYNC resolver. If that is ever too short, both sides still show the lock,
+# and a PARTIAL regression (client-rust reads past the orphan but leaves its lock) would
+# agree with a not-yet-settled oracle and HOLD silently. Until #58 lands, a HOLDS here
+# proves the read heals, and proves the lock is gone only when the oracle settled.
+#
+# The open gap's six divergence rows (class, native.type, proto.present, proto.type,
+# locks.count, locks at e53837d) are in the git history of this file.
 
 # ══════════════════════════════════════════════════════════════════════════════════════
 # G-0002 — RawKV Checksum does not exist in client-rust.

@@ -147,11 +147,11 @@ jobs:
       # THE PARITY LEDGER. Drives client-rust and client-go through the same scenarios
       # and checks the divergences against their DECLARED expectations.
       #
-      # Like `verdict`, a plain pass/fail is meaningless here: G-0001 is SUPPOSED to
-      # diverge at the pinned revision. What this asserts is that it diverges in exactly
-      # the predicted way. An unexpected CONVERGENCE fails the job on purpose — it means
-      # the gap closed upstream and the pin, the README and the ledger are all stale.
-      - name: ledger (expect G-0001 XDIVERGE)
+      # Like `verdict`, a plain pass/fail is meaningless here: each gap declares a
+      # polarity. At 3408d95 G-0001 is FIXED and must AGREE (a divergence fails as NEW
+      # GAP); G-0002 must diverge exactly as declared (a convergence fails as XCONVERGE,
+      # meaning the gap closed upstream and the pin, the README and the ledger are stale).
+      - name: ledger (expect G-0001 HOLDS, G-0002 XDIVERGE)
         run: make ledger
 
       - name: cluster logs
