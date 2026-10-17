@@ -151,10 +151,11 @@ make check          # fmt --check, clippy -D warnings, cargo check, broker tests
 
 `make verdict` is what CI runs, and it is the one to trust. Plain pass/fail is
 meaningless here: the harness carries no workarounds for client bugs, so a
-deficiency is a **failing test**, and at the pinned revision the *correct* outcome
-is "green except `d6` and `d7`". The verdict encodes that, requires each
-expected-red test to fail **on its own assertion**, and fails loudly if one ever
-passes — that is how you find out the day a gap is fixed upstream.
+deficiency is a **failing test**, and the verdict declares which tests are expected red
+at the pinned revision. It requires each expected-red test to fail **on its own
+assertion**, and fails loudly if one ever passes — that is how you find out the day a gap
+is fixed upstream. At the current pin the expected-red list is empty: the two findings that
+kept `d6` and `d7` red are fixed upstream, and both tests now guard against a regression.
 
 The cluster ([`cluster/`](cluster/)) is a throwaway single-node PD + TiKV with
 client-rust CI's aggressive region-split thresholds, so multi-key transactions
@@ -182,7 +183,16 @@ alike, and with a bridge network no single address reaches both, so isolation co
 ports, not networks. Profiles: `single`, `3store` (`chaos` arrives with the chaos tier).
 State lives in `$PARITY_BROKER_DIR` (default `~/.local/state/parity-broker`).
 
-## Gate verdict (v8.5.5 cluster, client-rust `master` @ e53837d)
+## Gate verdict (v8.5.5 cluster, client-rust `master` @ 3408d95)
+
+> At `3408d95` (upstream `master`, 2026-10-17) the gate is **all green**, `d6` and `d7`
+> included, and the ledger holds: G-0001 is FIXED and asserted to **agree**, G-0002 still
+> diverges as declared. Confirm the checkout with
+> `git -C ../client-rust describe --tags --always --dirty`. What changed since the
+> previous pin: the orphaned-lock fix landed as tikv/client-rust#561 (our #544 closed as
+> superseded), and the pessimistic-rollback fix as #547.
+
+### History: the verdict at `e53837d`
 
 > Run against an unmodified client-rust checkout; confirm with
 > `git -C ../client-rust describe --tags --always --dirty` (must read
@@ -217,8 +227,8 @@ State lives in `$PARITY_BROKER_DIR` (default `~/.local/state/parity-broker`).
 does not work around any of them; each is surfaced by a test and belongs
 fixed in client-rust.
 
-1. **Bug (regression in #519) — an orphaned lock is never resolved; filed as #543, fix PR #544 in flight**
-   (`d6`, currently **red** on `e53837d`; ledger **`G-0001`**, XDIVERGE;
+1. **Bug (regression in #519) — an orphaned lock is never resolved; filed as #543 — FIXED upstream by #561** (our #544 closed as superseded)
+   (`d6`, **red** on `e53837d`, green since `3408d95`; ledger **`G-0001`**, now FIXED and asserted to agree;
    [findings/](findings/txn-not-found-lock-resolution.md)). **Now also stated against
    the oracle**: `scenarios/orphaned-lock-resolution.json` manufactures one orphan with
    client-go's `CommitterProbe` and hands it to *each* client to resolve. client-go's
@@ -250,7 +260,7 @@ fixed in client-rust.
    this evaluation harness.)
 2. **Failed commits leave prewrite locks — one bug + one gap** (adversarially
    reviewed, confirmed against TiKV server source, **empirically reproduced**
-   by `failpoint_gate.rs::d7` / `make failpoint-test`; filed as #545, fix PR #547 in flight; write-up in
+   by `failpoint_gate.rs::d7` / `make failpoint-test`; filed as #545; **the bug half is FIXED by #547** (`d7` green since `3408d95`); write-up in
    [findings/pessimistic-rollback-leaves-prewrite-locks.md](findings/pessimistic-rollback-leaves-prewrite-locks.md)).
    Two halves:
    - **Bug (pessimistic-specific):** after a failed 2PC commit, even the

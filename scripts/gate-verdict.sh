@@ -36,8 +36,6 @@ cd "$(git rev-parse --show-toplevel)"
 # false-green this whole verdict mechanism exists to prevent. So the failure must
 # be the one we predicted, by its own assertion message.
 XFAIL=(
-  "gate|d6_orphaned_lock_must_be_resolved_by_client_rust|#519 regression: an orphaned lock is never resolved (fix: tikv/client-rust#544)|did NOT resolve the orphaned lock"
-  "failpoint_gate|d7_pessimistic_rollback_leaves_prewrite_locks|#545: pessimistic rollback leaves prewrite locks (fix: tikv/client-rust#547)|FINDING 2 (tikv/client-rust#545)"
 )
 
 rc=0

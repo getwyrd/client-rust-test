@@ -180,6 +180,7 @@ fn classify_inner(err: &Error) -> (Class, Option<serde_json::Value>) {
         | Error::InvalidSemver(_)
         | Error::KvError { .. }
         | Error::InternalError { .. }
+        | Error::ProtocolViolation { .. }
         | Error::StringError(_)
         | Error::KeyspaceNotFound(_)
         | Error::NestedRuntimeError(_) => (
@@ -309,6 +310,7 @@ fn variant_name(err: &Error) -> &'static str {
         Error::InvalidSemver(_) => "InvalidSemver",
         Error::KvError { .. } => "KvError",
         Error::InternalError { .. } => "InternalError",
+        Error::ProtocolViolation { .. } => "ProtocolViolation",
         Error::StringError(_) => "StringError",
         Error::PessimisticLockError { .. } => "PessimisticLockError",
         Error::KeyspaceNotFound(_) => "KeyspaceNotFound",
