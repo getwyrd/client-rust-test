@@ -4,9 +4,11 @@
 #
 # Everything else deliberately matches the single-node profile in docker-compose.yml:
 # the same digest-pinned images (cluster/images.env, generated from pins.toml), the
-# same tikv.toml split thresholds, the same host networking. Which also means the two
-# profiles are MUTUALLY EXCLUSIVE — they contend for the same host ports (PD 2379,
-# TiKV 2016x). `make cluster-down` before `make cluster-up-3store`, and vice versa.
+# same tikv.toml split thresholds, the same host networking (docker-compose.yml says
+# why). Every port is a variable scripts/cluster-broker sets per lease, so a 3-store and
+# a single-node cluster can run side by side on different port blocks. The defaults are
+# the classic ports — the broker's slot 0, which `make cluster-up-3store` uses — so the
+# two `make` targets still exclude each other.
 #
 #   make cluster-up-3store   # NOT `docker compose up` directly: no images.env
 name: client-rust-test-cluster-3store
@@ -17,8 +19,8 @@ services:
     command:
       - --name=pd
       - --data-dir=/data/pd
-      - --client-urls=http://127.0.0.1:2379
-      - --peer-urls=http://127.0.0.1:2380
+      - --client-urls=http://127.0.0.1:${PD_CLIENT_PORT:-2379}
+      - --peer-urls=http://127.0.0.1:${PD_PEER_PORT:-2380}
       - --config=/pd.toml
     volumes:
       - pd-data:/data
@@ -37,9 +39,9 @@ services:
         soft: 262144
         hard: 262144
     command:
-      - --pd-endpoints=127.0.0.1:2379
-      - --addr=127.0.0.1:20160
-      - --status-addr=127.0.0.1:20180
+      - --pd-endpoints=127.0.0.1:${PD_CLIENT_PORT:-2379}
+      - --addr=127.0.0.1:${TIKV0_PORT:-20160}
+      - --status-addr=127.0.0.1:${TIKV0_STATUS_PORT:-20180}
       - --data-dir=/data/tikv
       - --config=/tikv.toml
     volumes:
@@ -51,9 +53,9 @@ services:
   tikv1:
     <<: *tikv
     command:
-      - --pd-endpoints=127.0.0.1:2379
-      - --addr=127.0.0.1:20161
-      - --status-addr=127.0.0.1:20181
+      - --pd-endpoints=127.0.0.1:${PD_CLIENT_PORT:-2379}
+      - --addr=127.0.0.1:${TIKV1_PORT:-20161}
+      - --status-addr=127.0.0.1:${TIKV1_STATUS_PORT:-20181}
       - --data-dir=/data/tikv
       - --config=/tikv.toml
     volumes:
@@ -63,9 +65,9 @@ services:
   tikv2:
     <<: *tikv
     command:
-      - --pd-endpoints=127.0.0.1:2379
-      - --addr=127.0.0.1:20162
-      - --status-addr=127.0.0.1:20182
+      - --pd-endpoints=127.0.0.1:${PD_CLIENT_PORT:-2379}
+      - --addr=127.0.0.1:${TIKV2_PORT:-20162}
+      - --status-addr=127.0.0.1:${TIKV2_STATUS_PORT:-20182}
       - --data-dir=/data/tikv
       - --config=/tikv.toml
     volumes:

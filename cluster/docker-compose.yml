@@ -4,6 +4,12 @@
 # - v8.5.5 matches client-rust's own CI pin (its .github/workflows/ci.yml).
 # - Host networking keeps PD's advertised addresses reachable from the host
 #   without the classic bridged-advertise dance (Linux only, like this rig).
+#   PD and TiKV hand their OWN advertised address to every peer and client, so one
+#   address must work both from the other containers and from the host-side tests;
+#   with a bridge network no single address does. Isolation between concurrent
+#   clusters therefore comes from PORTS, not networks: every port below is a variable
+#   that scripts/cluster-broker sets per lease (defaults are the classic ports, which
+#   is what `make cluster-up` — the broker's slot 0 — uses).
 # - tikv.toml copies client-rust CI's aggressive region-split thresholds so
 #   multi-key transactions genuinely span Raft regions — the property M4
 #   depends on ("transactions span multiple keys across multiple regions").
@@ -22,8 +28,8 @@ services:
     command:
       - --name=pd
       - --data-dir=/data/pd
-      - --client-urls=http://127.0.0.1:2379
-      - --peer-urls=http://127.0.0.1:2380
+      - --client-urls=http://127.0.0.1:${PD_CLIENT_PORT:-2379}
+      - --peer-urls=http://127.0.0.1:${PD_PEER_PORT:-2380}
       - --config=/pd.toml
     volumes:
       - pd-data:/data
@@ -44,8 +50,10 @@ services:
         soft: 262144
         hard: 262144
     command:
-      - --pd-endpoints=127.0.0.1:2379
-      - --addr=127.0.0.1:20160
+      - --pd-endpoints=127.0.0.1:${PD_CLIENT_PORT:-2379}
+      - --addr=127.0.0.1:${TIKV0_PORT:-20160}
+      # Explicit: the default 20180 would collide between concurrent leases.
+      - --status-addr=127.0.0.1:${TIKV0_STATUS_PORT:-20180}
       - --data-dir=/data/tikv
       - --config=/tikv.toml
     volumes:
