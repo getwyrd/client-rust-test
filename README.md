@@ -263,6 +263,7 @@ fixed in client-rust.
      failure; client-go's `twoPhaseCommitter.execute` defers a best-effort
      `cleanup()` (a `BatchRollback` over all keys — which *does* clear
      pessimistic prewrite locks), skipped only when committed/undetermined.
+     Still open: tracked as getwyrd/client-rust-test#60.
 
    The store here uses the API correctly — `rollback()` after every failed
    commit, skipped on `UndeterminedError` — and relies on **client-rust** to

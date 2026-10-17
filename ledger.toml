@@ -81,9 +81,11 @@ finding        = "findings/txn-not-found-lock-resolution.md"
 
 # ─── What this `agrees` claim compares. Any divergence on these is a NEW GAP.
 #
-# Every step's projection compares `class`, `value`, `locks.count`, `locks`,
-# `proto.present` and `proto.type`; the scenario opts `native.type` in too
-# (`also_compare`). So a regression that re-breaks resolution — the read errors again with
+# Every step's projection compares `class` (and `class.parts` for a mixed class,
+# `unsupported.detail` for an unsupported one), `value`, `commit_ts` (whether present),
+# `locks.count`, `locks` (each as key, primary, kind and a TTL bucket), `proto.present`
+# and, when a proto is present, `proto.type` (crates/parity-proto/src/project.rs); the
+# scenario opts `native.type` in too (`also_compare`). So a regression that re-breaks resolution — the read errors again with
 # `MultipleKeyErrors` / `txn_not_found`, and the lock stays — diverges on class,
 # native.type, proto and locks, and fails loudly.
 #

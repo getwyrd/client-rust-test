@@ -1,7 +1,13 @@
 # Gate + ledger evidence at the client-rust pin 3408d95 (tikv/client-rust master, #561)
 # Captured 2026-10-17T17:17:46Z on a leased single-node TiKV/PD v8.5.5 cluster, PARITY_STRICT=1.
 # harness: f0fc607   client-rust: 0.4.0-22-g3408d95   client-go: 56e5933
-# The run waited 30 s after the lease for region splits to settle (#61). Go driver INFO/WARN log lines are omitted; everything else is verbatim.
+# The run waited 30 s after the lease for region splits to settle (#61).
+# Lines starting with `#` are commentary, written with the file. Every other line is the
+# capture script's output, verbatim except for two filters: in `## make verdict`, indented
+# cargo progress lines (Compiling, Checking, Finished, Running, Downloaded, Downloading,
+# Fresh) are dropped; in `## make ledger`, Go driver log lines (any level; they start with a
+# `[YYYY/` timestamp) and indented Compiling, Checking, Finished, Running lines are dropped.
+# `## make pins-check` and the trace summary are unfiltered.
 #
 # Earlier captures at this pin, for the record: four, superseded as the harness changed under
 # review. Two were green; two failed p0_cluster_can_split_regions on a
@@ -222,6 +228,8 @@ LEDGER: every claim holds at the pinned revisions.
 
 ## G-0001 from the traces of this run (results/ is not committed)
 # What a HOLDS here rests on (ledger.toml, #58): each side's read and its lock count after settle.
+# (locks.count on reader-final-read is always 0: that step is a snapshot_get, which reports no
+# locks. The rows that matter are reader-locks-after.)
 oracle   reader-final-read    class=not_found  locks.count=0
 oracle   reader-locks-after   class=ok  locks.count=0
 subject  reader-final-read    class=not_found  locks.count=0
