@@ -24,11 +24,12 @@ schema = "parity-pins/v1"
 upstream = "https://github.com/tikv/client-rust.git"
 fork     = "https://github.com/getwyrd/client-rust.git"
 
-# master @ "chore - Bump MSRV/toolchain to stable 1.93 (#530)".
-# Verified an ancestor of upstream/master (currently 1e8a488, PR #548 merged).
-# This is the rev the README's gate verdict is stated against — 16 green + d6
-# red — so CI reproduces a claim we can already check. Bump it only as a
-# deliberate, reviewed step: a bump re-states every ledger claim.
+# master @ "fix(transaction): recover expired async commit locks (#561)", 2026-10-17.
+# An ancestor of upstream/master (it IS upstream/master at the time of the move).
+# This is the rev the README's gate verdict is stated against — all green, no XFAIL;
+# ledger G-0001 FIXED (agrees), G-0002 open — so CI reproduces a claim we can already
+# check. Bump it only as a deliberate, reviewed step: a bump re-states every ledger claim.
+# (Previous pin: e53837d, #530 — 16 green + d6 and d7 red; see README § History.)
 rev = "3408d958c894f199c336f4439c43a5ada7af967a"
 
 # ─────────────────────────────────────────────────────────────────────────────

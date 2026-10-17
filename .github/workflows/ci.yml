@@ -135,12 +135,13 @@ jobs:
       - name: unit tests
         run: make unit-test
 
-      # Both suites, checked against the EXPECTED verdict: green except d6 and d7,
-      # which must be red (#519 -> PR 544, #545 -> PR 547 — both still open).
-      # An unexpected PASS fails this job on purpose: it means the gap closed
-      # upstream and the pin is stale. This also covers the failpoint suite, which
+      # Both suites, checked against the EXPECTED verdict: green except the tests
+      # scripts/gate-verdict.sh declares expected-red (none at 3408d95: d6 and d7 are
+      # fixed upstream by #561 and #547 and now guard against a regression).
+      # An unexpected PASS of a declared expected-red test fails this job on purpose:
+      # it means the gap closed upstream and the pin is stale. This also covers the failpoint suite, which
       # `make gate` used to skip entirely.
-      - name: verdict (expect green + d6/d7 XFAIL)
+      - name: verdict (expect green + any declared XFAIL)
         run: make verdict
 
       # THE PARITY LEDGER. Drives client-rust and client-go through the same scenarios

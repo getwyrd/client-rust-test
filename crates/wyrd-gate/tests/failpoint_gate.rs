@@ -20,9 +20,9 @@
 //! client-rust, not papered over here* — `d7` asserts what `rollback()` **must**
 //! do: clear the locks it placed, in both lock modes.
 //!
-//! It therefore **fails on the pinned baseline** (`e53837d`), where the bug is
-//! live, and **passes** once tikv/client-rust#547 lands. It is the regression
-//! test for that fix, not a preservation of the bug.
+//! It therefore **failed on the previous pin** (`e53837d`), where the bug was
+//! live, and **passes** since tikv/client-rust#547 landed (pin `3408d95`). It is
+//! the regression test for that fix, not a preservation of the bug.
 //!
 //! (It previously asserted `pess_locks == 1` — i.e. that the bug was *present* —
 //! which inverted the signal: the test went red the moment the client was fixed,
@@ -128,9 +128,9 @@ async fn d7_pessimistic_rollback_leaves_prewrite_locks() {
     // rollback that did not roll back. Optimistic mode already honors this
     // (above), so pessimistic mode must too.
     //
-    // RED on the pinned baseline (e53837d): PessimisticRollback removes only
-    // LockType::Pessimistic locks and silently skips the prewritten 2PC lock.
-    // GREEN once tikv/client-rust#547 lands. See
+    // RED at the previous pin (e53837d): PessimisticRollback removed only
+    // LockType::Pessimistic locks and silently skipped the prewritten 2PC lock.
+    // GREEN since tikv/client-rust#547 (pin 3408d95). See
     // findings/pessimistic-rollback-leaves-prewrite-locks.md.
     assert_eq!(
         pess_locks, 0,

@@ -1035,7 +1035,8 @@ async fn d5_woken_lock_waiter_surfaces_a_classifiable_write_conflict() {
 /// **Gate finding — client-rust regression (#519).** This test asserts the
 /// *correct* behavior and therefore **fails against unfixed client-rust**: it
 /// is the finding, expressed as a red test that turns green when the client is
-/// fixed. The harness deliberately carries **no lock-sweeping workaround** —
+/// fixed. Red at the previous pin (`e53837d`); green since tikv/client-rust#561
+/// (pin `3408d95`), and from there on a regression guard. The harness deliberately carries **no lock-sweeping workaround** —
 /// resolving an orphaned lock is client-rust's job, and the fix belongs there
 /// (see `findings/txn-not-found-lock-resolution.md` and the patch).
 ///
