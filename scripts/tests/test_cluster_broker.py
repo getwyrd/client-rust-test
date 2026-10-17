@@ -85,7 +85,9 @@ class Broker(unittest.TestCase):
         self.assertIn("slot 0 is held by lease manual-single", p.stderr)
 
     def test_a_busy_port_block_is_skipped(self):
-        s = socket.socket(); s.bind(("127.0.0.1", 32000)); s.listen()
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)   # a just-released lease leaves TIME_WAIT on it
+        s.bind(("127.0.0.1", 32000)); s.listen()
         try:
             a = self.lease("single")
         finally:

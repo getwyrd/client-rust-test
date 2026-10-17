@@ -42,18 +42,20 @@
 schema = "parity-ledger/v1"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
-# G-0001 — An orphaned lock is never resolved.
+# G-0001 — An orphaned lock is never resolved.  FIXED upstream — now a regression guard.
 #
-# Filed upstream as tikv/client-rust#543; the fix is PR #544 (a one-line widening of the
-# match arm), which is NOT in the pinned revision. So this gap is OPEN, and the day the
-# pin moves past the fix, XCONVERGE fires and this entry must be re-stated.
+# Filed upstream as tikv/client-rust#543. Our fix PR #544 was superseded by #561
+# ("recover expired async commit locks", 3408d95): a wider rework of `resolve_locks` that
+# includes #544's match-arm change in `check_txn_status` and an equivalent unit test;
+# #544 and #543 are closed. At the
+# pin 3408d95 the two clients AGREE, so this entry asserts that they keep agreeing.
 # ══════════════════════════════════════════════════════════════════════════════════════
 [[gap]]
 id     = "G-0001"
 slug   = "orphaned-lock-never-resolved"
 kind   = "behavioral"
 area   = "txn.lock-resolution"
-status = "OPEN"
+status = "FIXED"
 
 title = "An orphaned lock (primary never written) is never resolved; the key is left unreadable AND unwritable"
 
@@ -62,82 +64,39 @@ A key under a lock whose primary transaction has no lock and no commit/rollback 
 must become usable again once the lock's TTL expires: the client must escalate to
 rollback_if_not_exist, as client-go's LockResolver does.
 
-client-rust does not. `check_txn_status` matches `Error::ExtractedErrors`, but its plan
-shape (retry_multi_region -> merge(CollectSingle) -> extract_error) can only ever deliver
+Until 3408d95, client-rust did not. `check_txn_status` matched `Error::ExtractedErrors`, but its plan
+shape (retry_multi_region -> merge(CollectSingle) -> extract_error) could only ever deliver
 the key error as `Error::MultipleKeyErrors` — so the `rollback_if_not_exist` escalation in
-`get_txn_status_from_lock` is DEAD CODE. Introduced by 7d80f59 (#519); the pre-#519
+`get_txn_status_from_lock` was DEAD CODE. Fixed by tikv/client-rust#561, which matches both
+variants; at 3408d95 the reader resolves the orphan and reads `not_found`, as client-go does. Introduced by 7d80f59 (#519); the pre-#519
 resolver recovered this state via the legacy Cleanup path.
 """
 
 scenario = "scenarios/orphaned-lock-resolution.json"
-expect   = "diverges"
+expect   = "agrees"
 
 upstream_issue = "https://github.com/tikv/client-rust/issues/543"
-upstream_pr    = "https://github.com/tikv/client-rust/pull/544"
+upstream_pr    = "https://github.com/tikv/client-rust/pull/561"   # #544 closed as superseded
 finding        = "findings/txn-not-found-lock-resolution.md"
 
-# ─── The declared divergence. Anything MORE, or anything DIFFERENT, is a hard failure.
+# ─── What this `agrees` claim compares. Any divergence on these is a NEW GAP.
 #
-# Note what each row buys, because between them they close the loopholes a weaker claim
-# would leave open:
-
-# 1. The read ERRORS instead of succeeding. (`not_found` is the correct answer for the
-#    oracle: the orphaning txn never committed, so resolving it means rolling it back,
-#    and the key is then legitimately absent. The bug is not "the value is missing" —
-#    it is that client-rust cannot read the key AT ALL.)
-[[gap.divergence]]
-step    = "reader-final-read"
-path    = "class"
-oracle  = "not_found"
-subject = "txn_not_found"
-
-# 2. THE ROOT CAUSE, IN EVIDENCE. `native.type` is not compared by default — both
-#    clients report the same canonical fact here, so a class-only diff would call them
-#    identical. Opting in (scenario.also_compare) exposes the client's OWN taxonomy, and
-#    `MultipleKeyErrors` is precisely the variant #543 says arrives where the code
-#    expects `ExtractedErrors`. The bug is legible in the trace.
+# Every step's projection compares `class` (and `class.parts` for a mixed class,
+# `unsupported.detail` for an unsupported one), `value`, `commit_ts` (whether present),
+# `locks.count`, `locks` (each as key, primary, kind and a TTL bucket), `proto.present`
+# and, when a proto is present, `proto.type` (crates/parity-proto/src/project.rs); the
+# scenario opts `native.type` in too (`also_compare`). So a regression that re-breaks resolution — the read errors again with
+# `MultipleKeyErrors` / `txn_not_found`, and the lock stays — diverges on class,
+# native.type, proto and locks, and fails loudly.
 #
-#    The oracle side is `<absent>` because client-go's read SUCCEEDS — there is no error,
-#    so there is no error taxonomy to report. (Go's ErrNotExist sentinel is a calling
-#    convention for "key absent", not an error about TiKV, so the driver does not dress
-#    it up as one; see go/driver/observation.go. Otherwise every not_found comparison in
-#    the harness would carry a permanent, meaningless native.type divergence.)
-[[gap.divergence]]
-step    = "reader-final-read"
-path    = "native.type"
-oracle  = "<absent>"
-subject = "MultipleKeyErrors"
-
-# 3. THE STRONGER HALF: the lock is still THERE. A client that merely read past the
-#    orphan would have left the key unwritable. client-go removes it (asynchronously);
-#    client-rust leaves it forever, unchanged by TTL expiry.
-[[gap.divergence]]
-step    = "reader-locks-after"
-path    = "locks.count"
-oracle  = "0"
-subject = "1"
-
-# The two rows below are consequences of (1) — client-rust's error carries a kvproto and
-# client-go's untyped TxnNotFound does not. Declared so that the divergence set is
-# COMPLETE: an undeclared extra divergence is a WRONG DIVERGENCE, and it should be,
-# because it means something changed that we did not predict.
-[[gap.divergence]]
-step    = "reader-final-read"
-path    = "proto.present"
-oracle  = "false"
-subject = "true"
-
-[[gap.divergence]]
-step    = "reader-final-read"
-path    = "proto.type"
-oracle  = "<step absent>"
-subject = "key_error.txn_not_found"
-
-[[gap.divergence]]
-step    = "reader-locks-after"
-path    = "locks"
-oracle  = ""
-subject = "key={P}z-secondary primary={P}a-primary kind=put ttl=positive"
+# Known weakness (getwyrd/client-rust-test#58): the `settle` step waits a fixed 6 s for
+# client-go's ASYNC resolver. If that is ever too short, both sides still show the lock,
+# and a PARTIAL regression (client-rust reads past the orphan but leaves its lock) would
+# agree with a not-yet-settled oracle and HOLD silently. Until #58 lands, a HOLDS here
+# proves the read heals, and proves the lock is gone only when the oracle settled.
+#
+# The open gap's six divergence rows (class, native.type, proto.present, proto.type,
+# locks.count, locks at e53837d) are in the git history of this file.
 
 # ══════════════════════════════════════════════════════════════════════════════════════
 # G-0002 — RawKV Checksum does not exist in client-rust.

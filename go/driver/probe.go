@@ -8,7 +8,7 @@
 // Finding 1's orphan is: a lock on a SECONDARY key whose PRIMARY was never written.
 // Its primary has no lock and no write record, so a reader cannot learn the txn's fate
 // from it and must escalate to `rollback_if_not_exist` once the TTL expires. client-go
-// does. client-rust (#543) does not — the heal path is dead code.
+// does. client-rust did not until tikv/client-rust#561 (#543: the heal path was dead code).
 //
 // Manufacturing that with the public API alone is what gate.rs::d6 does, and it is
 // brutal: force a PD region split so primary and secondary land in different regions,

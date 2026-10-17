@@ -1,5 +1,7 @@
 ## Summary
 
+**Status: the bug half is FIXED by tikv/client-rust#547** (`d7` green since pin `3408d95`). The gap half — client-go's proactive cleanup when a commit fails — is not closed; it is tracked as getwyrd/client-rust-test#60. The write-up below is the record at `e53837d`.
+
 When a **pessimistic** transaction's 2PC commit fails after `prewrite` has
 already placed locks on some regions, those prewrite locks are not cleaned up —
 not by `commit()` (which propagates the error and does nothing), and **not even
