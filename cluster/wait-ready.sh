@@ -6,6 +6,10 @@
 #   want           how many stores must be Up (default 1; the 3-store profile passes 3)
 #   $COMPOSE_FILE  which compose file the death-check inspects
 #                  (default cluster/docker-compose.yml; the 3-store target overrides)
+#   $CLUSTER_ENV_FILE     the env file the cluster was started with
+#                         (default cluster/images.env; a broker lease passes its own)
+#   $COMPOSE_PROJECT_NAME the compose project to inspect (a broker lease's `crt-<id>`;
+#                         unset means the compose file's own `name:`)
 set -euo pipefail
 
 WANT="${1:-1}"
@@ -26,7 +30,7 @@ done
 # reports the symptom ("no store reached Up") and hides the cause. If we are
 # driving the compose cluster, notice a dead container immediately and print what
 # it actually said. (Skipped when pointing $PD_ADDRS at some other cluster.)
-COMPOSE="docker compose --env-file cluster/images.env -f ${COMPOSE_FILE:-cluster/docker-compose.yml}"
+COMPOSE="docker compose --env-file ${CLUSTER_ENV_FILE:-cluster/images.env} -f ${COMPOSE_FILE:-cluster/docker-compose.yml}${COMPOSE_PROJECT_NAME:+ -p $COMPOSE_PROJECT_NAME}"
 tikv_died() {
     command -v docker >/dev/null 2>&1 || return 1
     # `ps` without -a lists only RUNNING containers, so a container that died

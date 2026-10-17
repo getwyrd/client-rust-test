@@ -166,5 +166,27 @@ if grep -qE '^\s*image:\s*pingcap/' cluster/docker-compose.yml 2>/dev/null; then
        mutable, so a verdict signed against it is not reproducible."
 fi
 
+# ── 5. every matrix version is pinned by tag AND digest ──────────────────────
+# A floating tag in [cluster.versions] would make a matrix verdict unreproducible —
+# the same reason the default pin carries its digest.
+bad_versions=$(python3 -c "
+import tomllib,pathlib,re
+d=tomllib.loads(pathlib.Path('$PINS').read_text())
+for v,row in (d.get('cluster',{}).get('versions') or {}).items():
+    for f in ('pd_image','tikv_image'):
+        img=row.get(f,'')
+        if not re.fullmatch(r'pingcap/(pd|tikv):'+re.escape(v)+r'@sha256:[0-9a-f]{64}', img):
+            print(f'{v}.{f}={img!r}')
+")
+if [ -n "$bad_versions" ]; then
+  bad "pins.toml [cluster.versions] entries must be pingcap/<pd|tikv>:<version>@sha256:<digest>:
+$bad_versions"
+else
+  note "cluster version matrix: $(python3 -c "
+import tomllib,pathlib
+d=tomllib.loads(pathlib.Path('$PINS').read_text())
+print(', '.join([d['cluster']['tikv_version']+' (default)']+sorted((d['cluster'].get('versions') or {}))))")"
+fi
+
 [ "$fail" -eq 0 ] && { echo "pins OK"; exit 0; }
 exit 1

@@ -113,7 +113,7 @@ wyrd/
     │   └── parity-runner/  # the comparator. Links NEITHER client, on purpose.
     ├── go/                 # drives client-go (the ORACLE), at the pinned module
     ├── scenarios/          # one scenario per claim, two clients, one diff
-    ├── cluster/            # throwaway single-node PD + TiKV (digest-pinned)
+    ├── cluster/            # throwaway PD + TiKV profiles (digest-pinned), leased by scripts/cluster-broker
     ├── scripts/            # pins, provenance, the verdicts
     ├── findings/           # the harness's output: write-ups, repros, evidence
     ├── docs/               # the roadmap, the client rules, the upstream issue map
@@ -140,13 +140,13 @@ make gate           # one-shot: cluster up, wait ready, run everything
 make cluster-down   # tear down the cluster and its data
 
 # individually:
-make cluster-up     # docker-compose PD + TiKV v8.5.5 (client-rust's CI pin)
+make cluster-up     # PD + TiKV v8.5.5 (client-rust's CI pin) on the classic ports, via the broker
 make unit-test      # cluster-free tests (prefix math, error classification)
 make verdict        # the gate, checked against the verdict EXPECTED at the pin
 make gate-test      # the cluster-backed gate, raw ($PD_ADDRS, default 127.0.0.1:2379)
 make failpoint-test # the failpoint proof (opt-in `failpoints` feature)
 make pins-check     # pins.toml agrees with everything, and names an upstream commit
-make check          # fmt --check, clippy -D warnings, cargo check
+make check          # fmt --check, clippy -D warnings, cargo check, broker tests
 ```
 
 `make verdict` is what CI runs, and it is the one to trust. Plain pass/fail is
@@ -159,6 +159,28 @@ passes — that is how you find out the day a gap is fixed upstream.
 The cluster ([`cluster/`](cluster/)) is a throwaway single-node PD + TiKV with
 client-rust CI's aggressive region-split thresholds, so multi-key transactions
 genuinely span Raft regions — the property M4 depends on.
+
+### More than one cluster: the broker
+
+[`scripts/cluster-broker`](scripts/cluster-broker) owns every cluster's lifecycle, so
+several runs can share one host. A lease is a whole cluster on its own block of ports
+with its own data volumes; the only thing a test needs from it is `$PD_ADDRS`.
+
+```sh
+./scripts/cluster-broker lease single --ttl 2h          # {"lease_id": …, "pd_addrs": "127.0.0.1:32000", …}
+./scripts/cluster-broker lease 3store --tikv v8.5.8     # any version pinned in pins.toml [cluster.versions]
+PD_ADDRS=127.0.0.1:32000 make verdict                   # gates never touch Docker
+./scripts/cluster-broker list                           # leases, slots, expiry
+./scripts/cluster-broker release <id>                   # compose down -v + forget
+./scripts/cluster-broker gc                             # release expired leases; report orphans
+```
+
+`make cluster-up` is the lease `manual-single` on slot 0 (the classic ports, no expiry),
+so CI and `$PD_ADDRS`'s default are unchanged; broker-allocated leases take slots 1..4.
+Clusters keep host networking: PD and TiKV advertise one address to peers and clients
+alike, and with a bridge network no single address reaches both, so isolation comes from
+ports, not networks. Profiles: `single`, `3store` (`chaos` arrives with the chaos tier).
+State lives in `$PARITY_BROKER_DIR` (default `~/.local/state/parity-broker`).
 
 ## Gate verdict (v8.5.5 cluster, client-rust `master` @ e53837d)
 

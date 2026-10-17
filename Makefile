@@ -25,10 +25,9 @@ GO ?= go
 # still works — that is the whole reason the dependency is a path dep.
 export PARITY_STRICT ?= 0
 
-COMPOSE := docker compose --env-file cluster/images.env -f cluster/docker-compose.yml
-
 .PHONY: default check go-check pins-check provenance unit-test gate-test verdict failpoint-test gate \
-        drivers parity ledger cluster-up cluster-down cluster-logs clean
+        drivers parity ledger cluster-up cluster-down cluster-logs cluster-up-3store \
+        cluster-down-3store broker-test clean
 
 default: check
 
@@ -36,7 +35,7 @@ default: check
 # fault injection into every member. Name the features instead.
 CARGO_FEATURES := --features wyrd-gate/integration-tests,wyrd-gate/failpoints
 
-check: pins-check go-check
+check: pins-check go-check broker-test
 	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets $(CARGO_FEATURES) -- -D warnings
 	cargo check --workspace --all-targets $(CARGO_FEATURES)
@@ -131,39 +130,43 @@ ledger: parity
 # kind, which is later work.
 gate: cluster-up unit-test verdict ledger
 
-cluster-up: cluster/images.env
-	$(COMPOSE) up -d
-	./cluster/wait-ready.sh
+# The cluster targets go through scripts/cluster-broker, which owns every cluster's
+# lifecycle (client-rust-loop-design WP-03). A human or CI cluster is the lease
+# `manual-single` (or `manual-3store`) on slot 0 — the classic ports, so $PD_ADDRS keeps
+# its default — with no expiry. Concurrent runs lease their own slot:
+#   ./scripts/cluster-broker lease single --ttl 2h   # prints {"pd_addrs": ...}
+BROKER := ./scripts/cluster-broker
 
-# Generated, gitignored: the digest-pinned images, from pins.toml.
+cluster-up:
+	$(BROKER) lease single --slot 0 --ttl 0 --id manual-single --owner make
+
+# Generated, gitignored: the default pin's images, from pins.toml — for running compose
+# by hand. The broker writes its own per-lease env file (images + ports) instead, and
+# tears a lease down from that file, so `cluster-down` works on a fresh checkout too.
 cluster/images.env: pins.toml scripts/cluster-env.sh
 	./scripts/cluster-env.sh > $@
 
-# These depend on images.env too. Every compose invocation passes
-# `--env-file cluster/images.env`, and the file is generated + gitignored — so on a
-# fresh checkout, or right after `make clean` removed it, compose would fail before
-# it could tear anything down. Leaving a running cluster with no way to stop it is
-# a poor trap to set. The dep regenerates it; it is cheap and idempotent.
-cluster-down: cluster/images.env
-	$(COMPOSE) down -v
+cluster-down:
+	$(BROKER) release manual-single --missing-ok
 
-cluster-logs: cluster/images.env
-	$(COMPOSE) logs --tail 100
+cluster-logs:
+	$(BROKER) logs manual-single
 
 # ── The 3-store profile ────────────────────────────────────────────────────────────
 # Three TiKV stores, three replicas per region (cluster/pd-3store.toml) — the harness
 # prerequisite for replica/stale-read scenarios (docs/parity-roadmap.md §5.4/§8).
-# MUTUALLY EXCLUSIVE with the single-node profile: same host ports. `make cluster-down`
-# first. No scenario uses this profile yet; it exists so 5.4's scenarios have somewhere
+# These `make` targets share slot 0 with the single-node ones, so they still exclude each
+# other (`make cluster-down` first); broker leases on other slots run side by side. No scenario uses this profile yet; it exists so 5.4's scenarios have somewhere
 # to run, and so its bring-up is verified before it is needed.
-COMPOSE_3STORE := docker compose --env-file cluster/images.env -f cluster/docker-compose-3store.yml
+cluster-up-3store:
+	$(BROKER) lease 3store --slot 0 --ttl 0 --id manual-3store --owner make
 
-cluster-up-3store: cluster/images.env
-	$(COMPOSE_3STORE) up -d
-	COMPOSE_FILE=cluster/docker-compose-3store.yml ./cluster/wait-ready.sh 3
+cluster-down-3store:
+	$(BROKER) release manual-3store --missing-ok
 
-cluster-down-3store: cluster/images.env
-	$(COMPOSE_3STORE) down -v
+# The broker's own tests: Docker and the readiness poll are stubbed, so they run anywhere.
+broker-test:
+	python3 -m unittest discover -s scripts/tests
 
 clean:
 	cargo clean

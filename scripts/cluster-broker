@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""Lease throwaway PD + TiKV clusters, so several runs can share one host.
+
+    cluster-broker lease <profile> [--tikv VERSION] [--ttl 2h|30m|0] [--slot N] [--id ID] [--owner TEXT]
+    cluster-broker release <id> [--missing-ok]
+    cluster-broker renew <id> [--ttl 2h]
+    cluster-broker env <id>          # prints `export PD_ADDRS=…` for a shell
+    cluster-broker list [--json]
+    cluster-broker logs <id>
+    cluster-broker gc                # release expired leases, report orphans
+
+`lease` prints one JSON object: lease_id, pd_addrs, project, profile, tikv_version,
+slot, ports, expires_at. A gate needs nothing but `pd_addrs` (as $PD_ADDRS): the broker
+is the only component that talks to Docker, so a gate can run where the Docker socket is
+not reachable (client-rust-loop-design WP-03/WP-04).
+
+Why ports and not networks. PD and TiKV hand their own advertised address to every peer
+and client, so one address has to work from the other containers AND from the host-side
+tests. With a bridge network no single address does, so every lease runs with host
+networking on its own block of ports (`slot`). Slot 0 is the classic block (PD 2379,
+TiKV 20160..) that `make cluster-up` and CI use; leases the broker allocates itself take
+slots 1..N, so a human cluster and loop leases never collide.
+
+Profiles: `single` (cluster/docker-compose.yml) and `3store`
+(cluster/docker-compose-3store.yml). `chaos` arrives with the chaos tier (design WP-10).
+Versions: the default pin and every `[cluster.versions]` entry in pins.toml.
+
+State lives in $PARITY_BROKER_DIR (default $XDG_STATE_HOME/parity-broker, i.e.
+~/.local/state/parity-broker): one JSON file and one env file per lease, guarded by a
+lock file. A host restart loses the containers' processes but not their volumes, so run
+`cluster-broker gc` at boot (or before a batch) to clear what expired.
+
+Environment (tests and bespoke setups): PARITY_BROKER_MAX_LEASES (default 4, slots
+1..N), PARITY_BROKER_DOCKER (default `docker`), PARITY_BROKER_WAIT (default
+cluster/wait-ready.sh), PARITY_BROKER_PORT_CHECK=0 to skip the bind test.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+import re
+import secrets
+import shlex
+import socket
+import subprocess
+import sys
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+PROFILES = {
+    "single": {"compose": "cluster/docker-compose.yml", "stores": 1},
+    "3store": {"compose": "cluster/docker-compose-3store.yml", "stores": 3},
+}
+NOT_YET = {"chaos": "the chaos profile arrives with the chaos tier (client-rust-loop-design WP-10)"}
+PROJECT_PREFIX = "crt-"
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
+
+
+def state_dir() -> Path:
+    env = os.environ.get("PARITY_BROKER_DIR")
+    if env:
+        return Path(env)
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "parity-broker"
+
+
+def max_leases() -> int:
+    return int(os.environ.get("PARITY_BROKER_MAX_LEASES", "4"))
+
+
+def docker() -> list[str]:
+    return shlex.split(os.environ.get("PARITY_BROKER_DOCKER", "docker"))
+
+
+def wait_cmd() -> list[str]:
+    return shlex.split(os.environ.get("PARITY_BROKER_WAIT", str(REPO / "cluster" / "wait-ready.sh")))
+
+
+def now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def parse_ttl(text: str) -> timedelta | None:
+    """'2h', '30m', '45s', '1d' → timedelta; '0' → None (never expires)."""
+    if text.strip() == "0":
+        return None
+    m = re.fullmatch(r"(\d+)([smhd])", text.strip())
+    if not m:
+        raise ValueError(f"bad --ttl {text!r}: use e.g. 2h, 30m, or 0 for no expiry")
+    unit = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}[m.group(2)]
+    return timedelta(**{unit: int(m.group(1))})
+
+
+def ports(slot: int, stores: int) -> dict[str, int]:
+    if slot == 0:
+        base_pd, peer, tikv, status = 2379, 2380, 20160, 20180
+    else:
+        base = 32000 + (slot - 1) * 100
+        base_pd, peer, tikv, status = base, base + 1, base + 10, base + 20
+    out = {"PD_CLIENT_PORT": base_pd, "PD_PEER_PORT": peer}
+    for i in range(stores):
+        out[f"TIKV{i}_PORT"] = tikv + i
+        out[f"TIKV{i}_STATUS_PORT"] = status + i
+    return out
+
+
+def port_free(port: int) -> bool:
+    if os.environ.get("PARITY_BROKER_PORT_CHECK", "1") == "0":
+        return True
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+@contextmanager
+def locked():
+    d = state_dir()
+    (d / "leases").mkdir(parents=True, exist_ok=True)
+    with open(d / "broker.lock", "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield d / "leases"
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def load_all(leases: Path) -> dict[str, dict]:
+    out = {}
+    for f in sorted(leases.glob("*.json")):
+        try:
+            out[f.stem] = json.loads(f.read_text())
+        except ValueError:
+            continue
+    return out
+
+
+def expired(rec: dict, at: datetime | None = None) -> bool:
+    exp = rec.get("expires_at")
+    return bool(exp) and datetime.fromisoformat(exp) <= (at or now())
+
+
+def compose(rec: dict, *args: str) -> subprocess.CompletedProcess:
+    cmd = docker() + ["compose", "-p", rec["project"], "--env-file", rec["env_file"],
+                      "-f", str(REPO / rec["compose_file"]), *args]
+    return subprocess.run(cmd, cwd=REPO, text=True, capture_output=True)
+
+
+def images_env(version: str | None) -> str:
+    cmd = [str(REPO / "scripts" / "cluster-env.sh")] + ([version] if version else [])
+    p = subprocess.run(cmd, cwd=REPO, text=True, capture_output=True)
+    if p.returncode:
+        raise SystemExit(p.stderr.strip() or f"cluster-env.sh exited {p.returncode}")
+    return p.stdout
+
+
+def fail(msg: str, code: int = 1):
+    print(f"cluster-broker: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def cmd_lease(a) -> int:
+    if a.profile in NOT_YET:
+        fail(NOT_YET[a.profile], 2)
+    if a.profile not in PROFILES:
+        fail(f"unknown profile {a.profile!r}; profiles: {', '.join(PROFILES)}", 2)
+    if a.id and not ID_RE.match(a.id):
+        fail(f"bad --id {a.id!r}: lower-case letters, digits and '-', at most 31", 2)
+    try:
+        ttl = parse_ttl(a.ttl)
+    except ValueError as e:
+        fail(str(e), 2)
+    prof = PROFILES[a.profile]
+    env_text = images_env(a.tikv)               # refuses an unpinned version before anything starts
+    version = re.search(r"^TIKV_VERSION=(.*)$", env_text, re.M).group(1)
+
+    with locked() as leases:
+        current = load_all(leases)
+        if a.id and a.id in current:
+            rec = current[a.id]
+            if rec["profile"] != a.profile or rec["tikv_version"] != version:
+                fail(f"lease {a.id} exists as {rec['profile']}/{rec['tikv_version']}; release it first")
+            fresh = False
+        else:
+            taken = {r["slot"] for r in current.values()}
+            if a.slot is not None:
+                if a.slot in taken:
+                    holder = next(i for i, r in current.items() if r["slot"] == a.slot)
+                    fail(f"slot {a.slot} is held by lease {holder}")
+                candidates = [a.slot]
+            else:
+                if sum(1 for r in current.values() if r["slot"] != 0) >= max_leases():
+                    fail(f"all {max_leases()} lease slots are in use (PARITY_BROKER_MAX_LEASES)")
+                candidates = [s for s in range(1, max_leases() + 1) if s not in taken]
+            slot = next((s for s in candidates
+                         if all(port_free(p) for p in ports(s, prof["stores"]).values())), None)
+            if slot is None:
+                fail(f"no free port block among slots {candidates} (something else holds the ports)")
+            lid = a.id or secrets.token_hex(4)
+            pmap = ports(slot, prof["stores"])
+            env_file = leases / f"{lid}.env"
+            env_file.write_text(env_text + "".join(f"{k}={v}\n" for k, v in pmap.items()))
+            rec = {"lease_id": lid, "profile": a.profile, "tikv_version": version, "slot": slot,
+                   "ports": pmap, "pd_addrs": f"127.0.0.1:{pmap['PD_CLIENT_PORT']}",
+                   "project": PROJECT_PREFIX + lid, "compose_file": prof["compose"],
+                   "env_file": str(env_file), "owner": a.owner or os.environ.get("USER", ""),
+                   "created_at": now().isoformat(timespec="seconds"),
+                   "expires_at": (now() + ttl).isoformat(timespec="seconds") if ttl else None}
+            (leases / f"{lid}.json").write_text(json.dumps(rec, indent=2) + "\n")
+            fresh = True
+
+    up = compose(rec, "up", "-d")
+    if up.returncode == 0:
+        env = {**os.environ, "PD_ADDRS": rec["pd_addrs"], "COMPOSE_FILE": rec["compose_file"],
+               "CLUSTER_ENV_FILE": rec["env_file"], "COMPOSE_PROJECT_NAME": rec["project"]}
+        ready = subprocess.run(wait_cmd() + [str(PROFILES[rec["profile"]]["stores"])], cwd=REPO,
+                               env=env, text=True, capture_output=True)
+    if up.returncode or ready.returncode:
+        detail = (up.stderr if up.returncode else ready.stderr + ready.stdout).strip()
+        if fresh:
+            _release(rec)
+        fail(f"lease {rec['lease_id']} did not come up; released.\n{detail[-2000:]}")
+    print(json.dumps({k: rec[k] for k in ("lease_id", "pd_addrs", "project", "profile",
+                                          "tikv_version", "slot", "ports", "expires_at")}))
+    return 0
+
+
+def _release(rec: dict) -> subprocess.CompletedProcess:
+    down = compose(rec, "down", "-v", "--remove-orphans")
+    for suffix in (".json", ".env"):
+        (state_dir() / "leases" / f"{rec['lease_id']}{suffix}").unlink(missing_ok=True)
+    return down
+
+
+def cmd_release(a) -> int:
+    with locked() as leases:
+        rec = load_all(leases).get(a.id)
+    if rec is None:
+        if a.missing_ok:
+            return 0
+        fail(f"no lease {a.id}")
+    down = _release(rec)
+    if down.returncode:
+        fail(f"released lease {a.id}, but `compose down` failed:\n{down.stderr.strip()[-1000:]}")
+    print(f"released {a.id}")
+    return 0
+
+
+def cmd_renew(a) -> int:
+    ttl = parse_ttl(a.ttl)
+    with locked() as leases:
+        f = leases / f"{a.id}.json"
+        if not f.is_file():
+            fail(f"no lease {a.id}")
+        rec = json.loads(f.read_text())
+        rec["expires_at"] = (now() + ttl).isoformat(timespec="seconds") if ttl else None
+        f.write_text(json.dumps(rec, indent=2) + "\n")
+    print(f"renewed {a.id} until {rec['expires_at'] or 'never'}")
+    return 0
+
+
+def cmd_env(a) -> int:
+    with locked() as leases:
+        rec = load_all(leases).get(a.id)
+    if rec is None:
+        fail(f"no lease {a.id}")
+    print(f"export PD_ADDRS={rec['pd_addrs']}")
+    return 0
+
+
+def cmd_list(a) -> int:
+    with locked() as leases:
+        recs = list(load_all(leases).values())
+    if a.json:
+        print(json.dumps(recs, indent=2))
+        return 0
+    if not recs:
+        print("no leases")
+    for r in recs:
+        flag = " EXPIRED" if expired(r) else ""
+        print(f"{r['lease_id']:<14} {r['profile']:<7} {r['tikv_version']:<8} slot {r['slot']} "
+              f"PD {r['pd_addrs']:<16} until {r['expires_at'] or 'never'}{flag}  ({r['owner']})")
+    return 0
+
+
+def cmd_logs(a) -> int:
+    with locked() as leases:
+        rec = load_all(leases).get(a.id)
+    if rec is None:
+        fail(f"no lease {a.id}")
+    p = compose(rec, "logs", "--no-color", "--tail", "100")
+    sys.stdout.write(p.stdout + p.stderr)
+    return p.returncode
+
+
+def cmd_gc(a) -> int:
+    with locked() as leases:
+        recs = load_all(leases)
+    gone = [r for r in recs.values() if expired(r)]
+    rc = 0
+    for r in gone:
+        if _release(r).returncode:
+            rc = 1
+        print(f"gc: released expired lease {r['lease_id']} ({r['profile']}, slot {r['slot']})")
+    # Orphans: a crt-* compose project with no lease file (a crash between `up` and the
+    # lease write, or a hand-deleted state dir). Reported, never removed blind: it may be
+    # another broker state dir's lease.
+    ls = subprocess.run(docker() + ["compose", "ls", "--all", "--format", "json"],
+                        text=True, capture_output=True)
+    if ls.returncode == 0 and ls.stdout.strip():
+        try:
+            projects = [p["Name"] for p in json.loads(ls.stdout)]
+        except (ValueError, KeyError, TypeError):
+            projects = []
+        live = {r["project"] for r in recs.values()} - {r["project"] for r in gone}
+        for name in projects:
+            if name.startswith(PROJECT_PREFIX) and name not in live:
+                print(f"gc: orphan compose project {name} has no lease here — inspect, then "
+                      f"`docker compose -p {name} down -v`")
+    if not gone:
+        print("gc: nothing expired")
+    return rc
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="cluster-broker", description=__doc__.splitlines()[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("lease")
+    p.add_argument("profile")
+    p.add_argument("--tikv", default=None, help="a pinned TiKV version (default: pins.toml [cluster])")
+    p.add_argument("--ttl", default="2h")
+    p.add_argument("--slot", type=int, default=None, help="force a port block (0 = the classic ports)")
+    p.add_argument("--id", default=None)
+    p.add_argument("--owner", default=None)
+    p.set_defaults(fn=cmd_lease)
+    p = sub.add_parser("release")
+    p.add_argument("id")
+    p.add_argument("--missing-ok", action="store_true")
+    p.set_defaults(fn=cmd_release)
+    p = sub.add_parser("renew")
+    p.add_argument("id")
+    p.add_argument("--ttl", default="2h")
+    p.set_defaults(fn=cmd_renew)
+    for name, fn in (("env", cmd_env), ("logs", cmd_logs)):
+        p = sub.add_parser(name)
+        p.add_argument("id")
+        p.set_defaults(fn=fn)
+    p = sub.add_parser("list")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_list)
+    sub.add_parser("gc").set_defaults(fn=cmd_gc)
+    a = ap.parse_args(argv)
+    return a.fn(a)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
