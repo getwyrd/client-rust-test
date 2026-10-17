@@ -1,6 +1,10 @@
 # Regression (#519): orphaned secondary lock is never resolved — reads fail with `TxnNotFound` forever
 
-Filed upstream as tikv/client-rust#543; fix in flight as PR #544. Status: verified
+Filed upstream as tikv/client-rust#543. **Status: FIXED upstream by
+tikv/client-rust#561** (merged 2026-10-17, pin `3408d95`), a wider `resolve_locks` rework
+that includes our PR #544's match-arm change (#544 closed as superseded) and an equivalent
+unit test; ledger G-0001 is now
+FIXED and asserted to agree. The write-up below is the record at `e53837d`: verified
 locally, causal chain adversarially reviewed and confirmed, fix validated twice
 independently (see Fix validation).
 

@@ -72,12 +72,12 @@ fn classify_inner(err: &Error) -> (Class, Option<serde_json::Value>) {
         // client reporting 1-of-3 where the other reports 3-of-3 is a VISIBLE
         // difference, and collapsing it would hide exactly the divergence we hunt.
         //
-        // These two variants are the crux of finding 1. `check_txn_status` matches
-        // `ExtractedErrors`, but the plan shape (retry_multi_region -> merge ->
-        // extract_error) can only ever deliver `MultipleKeyErrors` — so the
-        // `rollback_if_not_exist` heal path is dead code. They map to the SAME class
-        // (the underlying fact is the same), and `native.type` preserves the
-        // distinction that IS the bug.
+        // These two variants were the crux of finding 1. Until tikv/client-rust#561,
+        // `check_txn_status` matched only `ExtractedErrors`, but the plan shape
+        // (retry_multi_region -> merge -> extract_error) could only deliver
+        // `MultipleKeyErrors` — so the `rollback_if_not_exist` heal path was dead code.
+        // They map to the SAME class (the underlying fact is the same), and
+        // `native.type` preserves the distinction that WAS the bug.
         Error::MultipleKeyErrors(errs) | Error::ExtractedErrors(errs) => {
             let parts: Vec<Class> = errs.iter().map(|e| classify_inner(e).0).collect();
             match parts.as_slice() {
@@ -180,6 +180,7 @@ fn classify_inner(err: &Error) -> (Class, Option<serde_json::Value>) {
         | Error::InvalidSemver(_)
         | Error::KvError { .. }
         | Error::InternalError { .. }
+        | Error::ProtocolViolation { .. }
         | Error::StringError(_)
         | Error::KeyspaceNotFound(_)
         | Error::NestedRuntimeError(_) => (
@@ -309,6 +310,7 @@ fn variant_name(err: &Error) -> &'static str {
         Error::InvalidSemver(_) => "InvalidSemver",
         Error::KvError { .. } => "KvError",
         Error::InternalError { .. } => "InternalError",
+        Error::ProtocolViolation { .. } => "ProtocolViolation",
         Error::StringError(_) => "StringError",
         Error::PessimisticLockError { .. } => "PessimisticLockError",
         Error::KeyspaceNotFound(_) => "KeyspaceNotFound",

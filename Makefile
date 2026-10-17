@@ -70,14 +70,14 @@ unit-test:
 gate-test: provenance
 	cargo test -p wyrd-gate --features integration-tests --test gate -- --show-output
 
-# Both suites, checked against the verdict EXPECTED at the pinned revision:
-# everything green except d6 and d7, which MUST be red. Each asserts the correct
-# behavior of a gap that is still open upstream (#519 -> PR 544, #545 -> PR 547),
-# so each turns green only when its fix lands.
+# Both suites, checked against the verdict EXPECTED at the pinned revision: every test
+# green except those declared expected-red in scripts/gate-verdict.sh's XFAIL table.
+# At 3408d95 that table is EMPTY: d6 (#519, fixed by tikv/client-rust#561) and d7 (#545,
+# fixed by #547) were red at the previous pin and now guard against a regression.
 #
-# A raw `gate-test` / `failpoint-test` exits non-zero at the pinned revision —
-# those two are supposed to fail — which makes plain pass/fail useless as a
-# signal for this repo. This target encodes the expectation instead, and fails
+# While the table holds a row, a raw `gate-test` / `failpoint-test` exits non-zero at
+# the pinned revision — that test is supposed to fail — which makes plain pass/fail
+# useless as a signal for this repo. This target encodes the expectation instead, and fails
 # loudly if either ever PASSES: that means the gap closed upstream and the pin,
 # the README verdict, and the ledger are all stale.
 #
