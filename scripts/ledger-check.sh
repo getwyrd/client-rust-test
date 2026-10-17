@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # THE PARITY LEDGER CHECK. Proves ledger.toml against a pinned differential run.
 #
-# This is scripts/gate-verdict.sh, generalized. gate-verdict.sh hard-codes two XFAIL rows
+# This is scripts/gate-verdict.sh, generalized. gate-verdict.sh hard-codes its XFAIL rows
 # and one kind of evidence (a cargo test's exit status plus a substring of its stdout).
 # It calls itself, accurately, "a deliberately small stand-in for the parity ledger,
 # which generalizes it to every gap with a declared expectation and machine-checked
