@@ -57,14 +57,17 @@ wins and this line is a defect.
   before any secondary; until the primary commit is durable the transaction stays
   rollbackable. Async commit / 1PC\*: once every prewrite has succeeded *as async commit*
   (each response carries a non-zero `min_commit_ts`; a zero means TiKV declined — WR-5) or,
-  for 1PC, once a `one_pc_commit_ts` is returned, the transaction IS committed and must
-  never be rolled back.
+  for 1PC, once a non-zero `one_pc_commit_ts` is returned (zero means TiKV declined), the
+  transaction IS committed and must never be rolled back.
 - **WR-3** — if the outcome at the commit point is unknowable — 2PC: the primary commit;
   async commit / 1PC\*: any prewrite — because an RPC was lost after send or TiKV returned
   `UndeterminedResult`, report *undetermined*, never clean failure, and do no cleanup. A
   later error on a retry does not make an earlier lost attempt determined; only a success,
-  or an answer proving the earlier attempt failed (the primary lock is still there, e.g.
-  `CommitTsExpired`), does.
+  an answer proving the earlier attempt failed (the primary lock is still there, e.g.
+  `CommitTsExpired`), or a confirmed fallback (an *async-commit* prewrite answered
+  `min_commit_ts == 0`: TiKV declined, so the transaction cannot have committed as async
+  commit and no commit was sent) does. A 1PC decline, or a 2PC re-prewrite after a lost
+  async-commit/1PC attempt, does not.
 - **WR-4** — when the client knows a transaction failed, its prewritten and pessimistic
   locks are actively cleaned up, not abandoned to TTL.
 - **WR-5\*** — async commit: list **all** secondaries in the primary's prewrite; adopt the
