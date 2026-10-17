@@ -25,9 +25,18 @@ disagreement, that file wins, and this section is stale.
   decides a verdict may depend on `tikv-client` or client-go.
 - **The oracle is pinned by module, never replaced.** No `replace` of
   `github.com/tikv/client-go/v2` in `go/go.mod`; no tracked `go/go.work`.
-- **One place names a revision: `pins.toml`.** Every other consumer is checked against it
-  by `make pins-check`. A loop bundle never edits `pins.toml` (design R3); a pin move is a
-  human or `pin-move` bundle.
+- **One place names a revision: `pins.toml`.** `make pins-check` checks only these
+  consumers against it: `rust-toolchain.toml`, `go/go.mod` (the client-go require, the `go`
+  directive, no `replace`), `go/go.sum` present, no tracked `go/go.work`, the sibling
+  client-go checkout's revision (when one exists), the client-rust pin's ancestry on
+  upstream, and that `cluster/docker-compose.yml` takes its images from
+  `cluster/images.env` instead of a hard-coded tag (the 3-store compose file is not
+  checked). It does **not** check revisions quoted in
+  prose: `README.md`'s gate-verdict heading and evidence must be updated by hand on a pin
+  move, and `docs/parity-roadmap.md`, `docs/client-rules.md` and
+  `docs/upstream-issue-map.md` are dated snapshots that name the revision they were written
+  at — re-derive them, never edit only the revision. A loop bundle never edits `pins.toml`
+  (design R3); a pin move is a human or `pin-move` bundle.
 - **A ledger entry declares a polarity and its fields.** `expect = "diverges"` needs the
   exact predicted fields; an entry a bundle did not declare is not edited by it.
 - **Parity is one-directional: Rust ⊇ Go.** Rust-only surface is not a gap
@@ -35,28 +44,73 @@ disagreement, that file wins, and this section is stale.
 
 ### Client rules a change to tikv-client must not break (MUST; source: docs/client-rules.md)
 
-- **TS-1/TS-2** — timestamps come from PD's TSO; `commit_ts > start_ts`, always.
-- **WR-1..WR-4** — one primary; prewrite all before committing any, primary before
-  secondaries; an unknowable primary-commit outcome is *undetermined*, never failure;
-  locks of a known-failed transaction are cleaned up, not left to TTL.
-- **WR-5..WR-7** (if async commit / 1PC is used) — fall back to 2PC when the server
-  declines; set and respect `max_commit_ts`.
-- **PL-1/PL-2** — each locking statement carries its own refreshed `for_update_ts`;
-  locks of a failed statement are pessimistic-rolled-back promptly.
-- **RD-1..RD-3** — read your own writes; never ignore a lock with `start_ts ≤ T`; stale
-  reads only where `safe_ts ≥ start_ts`.
-- **LR-1..LR-5** — resolve through the primary with an exact tri-state decode; no
-  rollback before TTL unless the status is known; escalate with `rollback_if_not_exist`;
-  never unilaterally roll back async-commit locks; `ResolveLock` carries the true outcome.
-- **RE-1..RE-4** — routing-stale errors refresh the cache from the error's hints and
-  retry; back-off-and-resend errors are retried honouring the hint; non-retryable errors
-  fail fast; retries are bounded and surface as region errors on exhaustion.
-- **ER-1..ER-3** — never misreport an outcome; "absent" is a result, not an error; honour
-  `KeyError`'s `locked` / `retryable` / `abort` routing.
-- **GC-1/GC-2** — resolve all locks below a safepoint before advancing it; never advance
-  past a snapshot a service still reads.
-- **RAW-1..RAW-3** — no RawKV beside TxnKV in API V1; a V1 client never sends V1TTL; CAS
-  only in atomic mode.
+One line per rule, kept to the source's conditions. `*` marks a conditional MUST: it binds
+only if the client uses that capability. Where a line and the source differ, the source
+wins and this line is a defect.
+
+- **TS-1** — every `start_ts` and `commit_ts` comes from PD's TSO, or from a
+  TiKV-sanctioned derivation such as `min_commit_ts` inference — never a local clock.
+- **TS-2** — `commit_ts > start_ts`, always.
+- **WR-1** — exactly one primary key; its lock is the source of truth for the transaction,
+  and every secondary lock points to it.
+- **WR-2** — prewrite everything before committing anything; commit the primary before any
+  secondary; until the primary commit is durable the transaction stays rollbackable.
+- **WR-3** — if the primary commit's outcome is unknowable (e.g. an RPC timeout after
+  send), report *undetermined*, never clean failure.
+- **WR-4** — when the client knows a transaction failed, its prewritten and pessimistic
+  locks are actively cleaned up, not abandoned to TTL.
+- **WR-5\*** — async commit: list **all** secondaries in the primary's prewrite; adopt the
+  server-derived commit ts; fall back to 2PC when the server declines (a
+  `min_commit_ts == 0` response).
+- **WR-6\*** — 1PC only for single-region transactions; when the server declines, fall
+  back to 2PC.
+- **WR-7\*** — 1PC / async commit: set and respect `max_commit_ts`; on
+  `CommitTsTooLarge`, abort or fall back.
+- **PL-1** — each locking statement carries its own `for_update_ts`, refreshed from TSO on
+  conflict retry (statement retry, not transaction retry).
+- **PL-2** — locks acquired for a statement that then fails are pessimistic-rolled-back
+  promptly, not left to block others for a TTL.
+- **RD-1** — a transaction reads its own uncommitted writes.
+- **RD-2** — a read at ts T never ignores a lock with `start_ts ≤ T`: back off or clean up
+  the lock, then retry.
+- **RD-3\*** — stale read only against replicas whose `safe_ts ≥ start_ts`; on
+  `DataIsNotReady`, retry elsewhere or fall back to the leader — never serve the read
+  anyway.
+- **LR-1** — a foreign lock is resolved through its primary: `CheckTxnStatus` on the primary
+  decides, with an exact tri-state decode — locked (`lock_ttl > 0`), committed
+  (`commit_version > 0`), rolled back (both zero).
+- **LR-2** — never roll back a lock before its TTL expires unless the transaction's status
+  is already known.
+- **LR-3** — an expired primary with no lock and no write record is escalated with
+  `rollback_if_not_exist`, leaving a rollback tombstone.
+- **LR-4** — async-commit locks are never unilaterally rolled back: check all secondaries
+  (`CheckSecondaryLocks`), then commit or roll back by the actual outcome.
+- **LR-5** — `ResolveLock` carries the transaction's true outcome: `commit_version == 0`
+  rolls back, `> 0` commits at that ts. Never guessed.
+- **RE-1** — routing-stale errors (`NotLeader`, `EpochNotMatch`, `StoreNotMatch`,
+  `RegionNotFound`, `StaleCommand`, `MismatchPeerId`) refresh the region cache using the
+  hints in the error and retry internally; they never surface as data errors.
+- **RE-2** — back-off-and-resend errors (`ServerIsBusy`, honouring its `backoff_ms`;
+  `MaxTimestampNotSynced`) are retried with backoff.
+- **RE-3** — non-retryable errors fail fast (`FlashbackInProgress`: fail ASAP, never
+  blind-retry).
+- **RE-4** — retries are bounded and backed off; on exhaustion the region error surfaces as
+  a region error, distinct from data errors.
+- **ER-1** — never misreport an outcome: failure is not success, unknown is not known, and
+  an unrecognized server error stays an error.
+- **ER-2** — "key absent" is a result, not an error, and is distinguishable from "read
+  failed".
+- **ER-3** — honour `KeyError` routing: `locked` → back off / resolve and retry;
+  `retryable` → the client may restart the txn; `abort` → the client aborts the txn.
+- **GC-1** — before advancing a GC safepoint, scan and resolve **all** locks with
+  `start_ts ≤ safepoint` (at or below it, the boundary included).
+- **GC-2** — never advance the cluster safepoint past a snapshot some service still reads;
+  on shared clusters that means service safepoints or the GC controller.
+- **RAW-1** — no RawKV alongside TxnKV in API V1; API V2's keyspace prefixes make
+  coexistence safe.
+- **RAW-2** — a V1 client never sends V1TTL.
+- **RAW-3** — CAS only in atomic mode, and atomic and non-atomic writes are never mixed on
+  the same keys.
 
 ### Recurring defect classes (MUST check when the diff touches the surface)
 
