@@ -1,0 +1,78 @@
+# Throwaway THREE-store TiKV + PD in the shape of client-rust's OWN CI — for running
+# client-rust's integration suites (`make integration-test` there) against a container
+# instead of `tiup playground`. Upstream CI runs `tiup playground --kv 3` with
+# client-rust's config/tikv.toml and config/pd.toml; this profile mounts those same two
+# files, so the cluster is api-v2 with TTL and gzip, which the suites need and the
+# harness's own profiles deliberately are not (cluster/tikv.toml says why).
+#
+# The config is read from $CLIENT_RUST_CONFIG at lease time (default: the sibling
+# ../client-rust/config). Point it at the checkout under test when a branch changes
+# those files. Everything else matches docker-compose-3store.yml: the same pinned
+# images, host networking and broker-assigned ports.
+#
+#   ./scripts/cluster-broker lease upstream --ttl 2h   # prints {"pd_addrs": ...}
+name: client-rust-test-cluster-upstream
+services:
+  pd:
+    image: ${PD_IMAGE:?unset — run via `make cluster-up-upstream`, which generates cluster/images.env from pins.toml}
+    network_mode: host
+    command:
+      - --name=pd
+      - --data-dir=/data/pd
+      - --client-urls=http://127.0.0.1:${PD_CLIENT_PORT:-2379}
+      - --peer-urls=http://127.0.0.1:${PD_PEER_PORT:-2380}
+      - --config=/pd.toml
+    volumes:
+      - pd-data:/data
+      - ${CLIENT_RUST_CONFIG:-../../client-rust/config}/pd.toml:/pd.toml:ro
+
+  # Distinct status ports per store: see docker-compose-3store.yml.
+  tikv0: &tikv
+    image: ${TIKV_IMAGE:?unset — run via `make cluster-up-upstream`, which generates cluster/images.env from pins.toml}
+    network_mode: host
+    # See docker-compose.yml for why this is explicit.
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    command:
+      - --pd-endpoints=127.0.0.1:${PD_CLIENT_PORT:-2379}
+      - --addr=127.0.0.1:${TIKV0_PORT:-20160}
+      - --status-addr=127.0.0.1:${TIKV0_STATUS_PORT:-20180}
+      - --data-dir=/data/tikv
+      - --config=/tikv.toml
+    volumes:
+      - tikv0-data:/data
+      - ${CLIENT_RUST_CONFIG:-../../client-rust/config}/tikv.toml:/tikv.toml:ro
+    depends_on:
+      - pd
+
+  tikv1:
+    <<: *tikv
+    command:
+      - --pd-endpoints=127.0.0.1:${PD_CLIENT_PORT:-2379}
+      - --addr=127.0.0.1:${TIKV1_PORT:-20161}
+      - --status-addr=127.0.0.1:${TIKV1_STATUS_PORT:-20181}
+      - --data-dir=/data/tikv
+      - --config=/tikv.toml
+    volumes:
+      - tikv1-data:/data
+      - ${CLIENT_RUST_CONFIG:-../../client-rust/config}/tikv.toml:/tikv.toml:ro
+
+  tikv2:
+    <<: *tikv
+    command:
+      - --pd-endpoints=127.0.0.1:${PD_CLIENT_PORT:-2379}
+      - --addr=127.0.0.1:${TIKV2_PORT:-20162}
+      - --status-addr=127.0.0.1:${TIKV2_STATUS_PORT:-20182}
+      - --data-dir=/data/tikv
+      - --config=/tikv.toml
+    volumes:
+      - tikv2-data:/data
+      - ${CLIENT_RUST_CONFIG:-../../client-rust/config}/tikv.toml:/tikv.toml:ro
+
+volumes:
+  pd-data: {}
+  tikv0-data: {}
+  tikv1-data: {}
+  tikv2-data: {}
