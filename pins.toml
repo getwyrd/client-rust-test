@@ -14,23 +14,34 @@ schema = "parity-pins/v1"
 # ─────────────────────────────────────────────────────────────────────────────
 # The SUBJECT under test.
 #
-# THE BASELINE IS UPSTREAM. Every gap this harness reports is stated against
-# tikv/client-rust, and every fix must land there. The fork is only where PR
-# branches live before they merge; `rev` must always be an ancestor of
-# upstream/master, which check-pins.sh enforces with `merge-base --is-ancestor`.
-# That check is what stops the harness certifying a verdict against fork-only
-# work that can never be upstreamed.
+# THE SUBJECT IS THE FORK'S `integration` BRANCH (ADR-0001, docs/design/adr/). It is
+# upstream tikv/client-rust plus the getwyrd PRs still waiting upstream, so the loop can
+# build on its own unmerged fixes. Two guards keep that honest, both enforced by
+# check-pins.sh:
+#   - `rev` must be on the first-parent chain of the fork's `branch` — a state the
+#     branch has been at, never a stray fork commit or a merged-in PR branch's commit;
+#   - `upstream_base` must be exactly where `rev` meets upstream/master (their
+#     merge-base) — the fork never leaves upstream, and the base is never stale.
+# Every gap is still filed against tikv/client-rust. CI also runs the parity diff at
+# `upstream_base` (informational, never gating) so the upstream view stays visible.
 [client_rust]
 upstream = "https://github.com/tikv/client-rust.git"
 fork     = "https://github.com/getwyrd/client-rust.git"
+branch   = "integration"
+
+# integration @ "Merge pull request #1 from getwyrd/agents-rubric", 2026-10-17:
+# upstream_base plus #557 (error variants), #551 (failpoint lock residue), #558 (TSO
+# deadline) and the fork-only AGENTS.md rubric. Pin one commit and bump it by hand, as a
+# reviewed step: a bump re-states every ledger claim. (Previous pin: 3408d95 on upstream
+# master, client-rust-test #57 — see README § History.)
+rev = "b10bc696225af8cec3cf8b6422c64bb3fe21f4b7"
 
 # master @ "fix(transaction): recover expired async commit locks (#561)", 2026-10-17.
-# An ancestor of upstream/master (it IS upstream/master at the time of the move).
-# This is the rev the README's gate verdict is stated against — all green, no XFAIL;
-# ledger G-0001 FIXED (agrees), G-0002 open — so CI reproduces a claim we can already
-# check. Bump it only as a deliberate, reviewed step: a bump re-states every ledger claim.
-# (Previous pin: e53837d, #530 — 16 green + d6 and d7 red; see README § History.)
-rev = "3408d958c894f199c336f4439c43a5ada7af967a"
+# Where integration meets upstream master. integration is updated by merges only and is
+# never force-pushed (branch protection disables force-pushes; admins are not bound by
+# it, so this is also a rule we keep), so every past pin stays reachable. When it merges
+# a newer upstream master, move this in the same pin bump.
+upstream_base = "3408d958c894f199c336f4439c43a5ada7af967a"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The ORACLE.

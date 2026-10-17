@@ -276,8 +276,10 @@ XCONVERGE — {gid} is declared to DIVERGE, and the two clients AGREED.
 The gap appears to be CLOSED at the pinned revision. That is good news, and it is a hard
 failure on purpose: the pin, the README's verdict, and this ledger entry are now stale.
 
-  1. confirm the fix merged upstream ({gap.get('upstream_pr', 'the upstream PR')})
-  2. bump pins.toml client_rust.rev to a commit that contains it
+  1. find the fix ({gap.get('upstream_pr', 'the upstream PR')}): on the fork's integration
+     branch, and whether it has merged upstream yet — CI's informational upstream_base run
+     shows the latter (ADR-0001)
+  2. make sure pins.toml client_rust.rev is an integration commit that contains it
   3. flip this entry to status = "FIXED" and expect = "agrees" — it becomes a permanent
      REGRESSION GUARD. Do not delete it: the day the fix regresses, this is what catches it.
 """, file=sys.stderr)

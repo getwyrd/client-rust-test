@@ -31,6 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       client_rust_rev: ${{ steps.p.outputs.client_rust_rev }}
+      client_rust_fork: ${{ steps.p.outputs.client_rust_fork }}
+      client_rust_upstream: ${{ steps.p.outputs.client_rust_upstream }}
+      client_rust_upstream_repo: ${{ steps.p.outputs.client_rust_upstream_repo }}
+      client_rust_upstream_base: ${{ steps.p.outputs.client_rust_upstream_base }}
       rust_toolchain:  ${{ steps.p.outputs.rust_toolchain }}
       go_toolchain:    ${{ steps.p.outputs.go_toolchain }}
     steps:
@@ -41,7 +45,13 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import tomllib, pathlib
           p = tomllib.loads(pathlib.Path("pins.toml").read_text())
-          print(f"client_rust_rev={p['client_rust']['rev']}")
+          r = p["client_rust"]
+          repo = lambda url: url.removeprefix("https://github.com/").removesuffix(".git")
+          print(f"client_rust_rev={r['rev']}")
+          print(f"client_rust_fork={repo(r['fork'])}")
+          print(f"client_rust_upstream={r['upstream']}")
+          print(f"client_rust_upstream_repo={repo(r['upstream'])}")
+          print(f"client_rust_upstream_base={r['upstream_base']}")
           print(f"rust_toolchain={p['toolchain']['rust']}")
           print(f"go_toolchain={p['toolchain']['go']}")
           PY
@@ -60,18 +70,22 @@ jobs:
       # deterministic in CI without rewriting the manifest — so a developer's
       # local sibling checkout keeps working untouched.
       #
-      # Cloned from UPSTREAM, not the fork: the baseline for every gap this
-      # harness reports is tikv/client-rust. check-pins.sh separately asserts the
-      # pin is an ancestor of upstream/master.
+      # Cloned from the FORK: the subject is its integration branch (ADR-0001).
+      # check-pins.sh asserts the pin is on that branch and that upstream_base is on
+      # upstream master, so the next step fetches upstream too.
       - uses: actions/checkout@v4
         with:
-          repository: tikv/client-rust
+          repository: ${{ needs.pins.outputs.client_rust_fork }}
           ref: ${{ needs.pins.outputs.client_rust_rev }}
           path: client-rust
-          # Full history: check-pins.sh must resolve origin/master to prove the
-          # pin is an ancestor of upstream. A shallow clone has no branch refs,
-          # and under PARITY_STRICT that is now a hard failure (as it should be).
+          # Full history: check-pins.sh must resolve origin/<branch>. A shallow clone
+          # has no branch refs, and under PARITY_STRICT that is a hard failure.
           fetch-depth: 0
+      - name: fetch upstream master (for the upstream_base check)
+        working-directory: client-rust
+        run: |
+          git remote add upstream "${{ needs.pins.outputs.client_rust_upstream }}"
+          git fetch --no-tags upstream master
 
       # No protoc step: client-rust has no build.rs and its `proto-build` member
       # is not in our dependency graph. (Its own CI needs protoc; we do not.)
@@ -107,12 +121,9 @@ jobs:
         with: { path: client-rust-test }
       - uses: actions/checkout@v4
         with:
-          repository: tikv/client-rust
+          repository: ${{ needs.pins.outputs.client_rust_fork }}
           ref: ${{ needs.pins.outputs.client_rust_rev }}
           path: client-rust
-          # Full history: check-pins.sh must resolve origin/master to prove the
-          # pin is an ancestor of upstream. A shallow clone has no branch refs,
-          # and under PARITY_STRICT that is now a hard failure (as it should be).
           fetch-depth: 0
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: client-rust-test }
@@ -136,10 +147,10 @@ jobs:
         run: make unit-test
 
       # Both suites, checked against the EXPECTED verdict: green except the tests
-      # scripts/gate-verdict.sh declares expected-red (none at 3408d95: d6 and d7 are
-      # fixed upstream by #561 and #547 and now guard against a regression).
+      # scripts/gate-verdict.sh declares expected-red (none at the current pin: d6 and d7
+      # are fixed upstream by #561 and #547 and now guard against a regression).
       # An unexpected PASS of a declared expected-red test fails this job on purpose:
-      # it means the gap closed upstream and the pin is stale. This also covers the failpoint suite, which
+      # it means the gap closed at the pin and the declarations are stale. This also covers the failpoint suite, which
       # `make gate` used to skip entirely.
       - name: verdict (expect green + any declared XFAIL)
         run: make verdict
@@ -148,9 +159,9 @@ jobs:
       # and checks the divergences against their DECLARED expectations.
       #
       # Like `verdict`, a plain pass/fail is meaningless here: each gap declares a
-      # polarity. At 3408d95 G-0001 is FIXED and must AGREE (a divergence fails as NEW
-      # GAP); G-0002 must diverge exactly as declared (a convergence fails as XCONVERGE,
-      # meaning the gap closed upstream and the pin, the README and the ledger are stale).
+      # polarity. At the current pin G-0001 is FIXED and must AGREE (a divergence fails as
+      # NEW GAP); G-0002 must diverge exactly as declared (a convergence fails as XCONVERGE,
+      # meaning the gap closed at the pin and the README and the ledger are stale).
       - name: ledger (expect G-0001 HOLDS, G-0002 XDIVERGE)
         run: make ledger
 
@@ -166,6 +177,57 @@ jobs:
           path: client-rust-test/results/**
           if-no-files-found: warn
 
+      - name: cluster down
+        if: always()
+        run: make cluster-down
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # THE UPSTREAM VIEW — informational, never gating (ADR-0001).
+  #
+  # The gate above judges the fork's integration branch. This job runs the parity diff
+  # at pins.toml upstream_base, plain tikv/client-rust, so the gaps still open UPSTREAM
+  # stay visible: a gap that agrees on integration but diverges here is fixed only in
+  # a fork PR that has not merged yet. PARITY_STRICT is off because the subject is
+  # deliberately not the pin, so this run is never ledger evidence (ledger-check
+  # refuses a strict:false run) — it is only the raw diff, uploaded for reading.
+  upstream-view:
+    needs: [pins, check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      PARITY_STRICT: "0"
+    defaults: { run: { working-directory: client-rust-test } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: client-rust-test }
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.pins.outputs.client_rust_upstream_repo }}
+          ref: ${{ needs.pins.outputs.client_rust_upstream_base }}
+          path: client-rust
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: client-rust-test }
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ needs.pins.outputs.go_toolchain }}
+          cache-dependency-path: client-rust-test/go/go.sum
+      - name: cluster up
+        run: make cluster-up
+      # upstream_base lacks #557, so the Rust driver builds with its pre-557 arms, and
+      # this is the only job that compiles and tests them. Once upstream_base includes
+      # #557 this build fails: drop the feature then.
+      - name: driver unit tests (pre-557)
+        run: cargo test -p rust-driver --features rust-driver/pre-557
+      - name: parity diff at upstream_base (informational)
+        run: make parity DRIVER_FEATURES=--features=rust-driver/pre-557
+      - name: upstream view
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-view
+          path: client-rust-test/results/**
+          if-no-files-found: warn
       - name: cluster down
         if: always()
         run: make cluster-down

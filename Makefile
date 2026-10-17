@@ -49,8 +49,8 @@ go-check:
 	cd go && test -z "$$(gofmt -l .)" || { echo "gofmt: files need formatting:"; gofmt -l go; exit 1; }
 
 # Static, cluster-free, sub-second: pins.toml agrees with rust-toolchain.toml,
-# go.mod and compose — and the client-rust pin is an ancestor of upstream/master,
-# so a gap stated against it is actually fileable upstream.
+# go.mod and compose — and the client-rust pin is on the fork's integration branch,
+# which sits on upstream history, so a gap stated against it is fileable upstream.
 pins-check:
 	./scripts/check-pins.sh
 
@@ -72,14 +72,14 @@ gate-test: provenance
 
 # Both suites, checked against the verdict EXPECTED at the pinned revision: every test
 # green except those declared expected-red in scripts/gate-verdict.sh's XFAIL table.
-# At 3408d95 that table is EMPTY: d6 (#519, fixed by tikv/client-rust#561) and d7 (#545,
-# fixed by #547) were red at the previous pin and now guard against a regression.
+# At the current pin that table is EMPTY: d6 (#519, fixed by tikv/client-rust#561) and d7
+# (#545, fixed by #547) were red at e53837d and now guard against a regression.
 #
 # While the table holds a row, a raw `gate-test` / `failpoint-test` exits non-zero at
 # the pinned revision — that test is supposed to fail — which makes plain pass/fail
 # useless as a signal for this repo. This target encodes the expectation instead, and fails
-# loudly if either ever PASSES: that means the gap closed upstream and the pin,
-# the README verdict, and the ledger are all stale.
+# loudly if either ever PASSES: that means the gap closed at the pin and the
+# README verdict and the ledger are stale.
 #
 # This is the target CI runs. It subsumes gate-test and failpoint-test, which
 # remain available for raw, unfiltered runs while iterating.
@@ -97,8 +97,12 @@ failpoint-test: provenance
 # The drivers. Each links ONE client and speaks the parity command protocol; the
 # runner links NEITHER, so the thing deciding a verdict cannot reach for the crate
 # it is adjudicating.
+#
+# DRIVER_FEATURES=--features=rust-driver/pre-557 builds the Rust driver against a
+# client-rust without #557 — CI's informational run at pins.toml upstream_base (ADR-0001).
+DRIVER_FEATURES ?=
 drivers:
-	cargo build -p rust-driver -p parity-runner
+	cargo build -p rust-driver -p parity-runner $(DRIVER_FEATURES)
 	cd go && $(GO) build -o ../target/parity-driver-go ./driver
 
 # Run every scenario against both clients and REPORT the diff. Deliberately does not

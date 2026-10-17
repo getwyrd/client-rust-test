@@ -28,8 +28,8 @@ disagreement, that file wins, and this section is stale.
 - **One place names a revision: `pins.toml`.** `make pins-check` checks only these
   consumers against it: `rust-toolchain.toml`, `go/go.mod` (the client-go require, the `go`
   directive, no `replace`), `go/go.sum` present, no tracked `go/go.work`, the sibling
-  client-go checkout's revision (when one exists), the client-rust pin's ancestry on
-  upstream, and that `cluster/docker-compose.yml` takes its images from
+  client-go checkout's revision (when one exists), the client-rust pin's ancestry (on the
+  fork's `integration` branch, with `upstream_base` on upstream master — ADR-0001), and that `cluster/docker-compose.yml` takes its images from
   `cluster/images.env` instead of a hard-coded tag (the 3-store compose file is not
   checked). It does **not** check revisions quoted in
   prose: `README.md`'s gate-verdict heading and evidence must be updated by hand on a pin
