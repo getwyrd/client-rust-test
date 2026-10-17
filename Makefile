@@ -166,7 +166,7 @@ cluster-down-3store:
 
 # The broker's own tests: Docker and the readiness poll are stubbed, so they run anywhere.
 broker-test:
-	python3 -m unittest discover -s scripts/tests
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
 
 clean:
 	cargo clean

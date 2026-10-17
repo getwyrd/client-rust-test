@@ -29,6 +29,7 @@ class Broker(unittest.TestCase):
             # `compose ls` answers with one orphan project for the gc test
             'if [[ "$*" == *"compose ls"* ]]; then echo \'[{"Name":"crt-orphan1"},{"Name":"other"}]\'; fi\n'
             '[ -f "$STUB_FAIL_UP" ] && [[ "$*" == *" up "* ]] && { echo boom >&2; exit 1; }\n'
+            '[ -f "$STUB_FAIL_DOWN" ] && [[ "$*" == *" down "* ]] && { echo down-boom >&2; exit 1; }\n'
             "exit 0\n")
         stub.chmod(0o755)
         ready = self.tmp / "ready"
@@ -38,7 +39,8 @@ class Broker(unittest.TestCase):
         self.env = {**os.environ, "PARITY_BROKER_DIR": str(self.tmp / "state"),
                     "PARITY_BROKER_DOCKER": str(stub), "PARITY_BROKER_WAIT": str(ready),
                     "PARITY_BROKER_MAX_LEASES": "2", "PARITY_BROKER_PORT_CHECK": "1",
-                    "STUB_FAIL_UP": str(self.tmp / "fail-up")}
+                    "STUB_FAIL_UP": str(self.tmp / "fail-up"),
+                    "STUB_FAIL_DOWN": str(self.tmp / "fail-down")}
 
     def run_broker(self, *args, ok=True):
         p = subprocess.run([sys.executable, str(BROKER), *args], cwd=REPO, env=self.env,
@@ -135,6 +137,57 @@ class Broker(unittest.TestCase):
     def test_matrix_version(self):
         a = self.lease("single", "--tikv", "v8.5.8")
         self.assertEqual(a["tikv_version"], "v8.5.8")
+
+    def _expire(self, lid):
+        f = Path(self.env["PARITY_BROKER_DIR"]) / "leases" / f"{lid}.json"
+        rec = json.loads(f.read_text()); rec["expires_at"] = "2000-01-01T00:00:00+00:00"
+        f.write_text(json.dumps(rec))
+
+    # Review on #55: a failed teardown must not make the broker forget the lease.
+    def test_failed_down_keeps_the_lease_for_a_retry(self):
+        a = self.lease("single")
+        (self.tmp / "fail-down").write_text("")
+        p = self.run_broker("release", a["lease_id"], ok=False)
+        self.assertIn("the lease is kept", p.stderr)
+        self.assertIn(a["lease_id"], self.run_broker("list").stdout)
+        (self.tmp / "fail-down").unlink()
+        self.run_broker("release", a["lease_id"])
+        self.assertIn("no leases", self.run_broker("list").stdout)
+
+    # Review on #55: gc claims a lease under the lock, so renew cannot race it.
+    def test_gc_claims_before_release_and_retries_a_failed_one(self):
+        a = self.lease("single")
+        self._expire(a["lease_id"])
+        (self.tmp / "fail-down").write_text("")
+        self.run_broker("gc", ok=False)
+        p = self.run_broker("renew", a["lease_id"], ok=False)
+        self.assertIn("is being released", p.stderr)
+        (self.tmp / "fail-down").unlink()
+        self.assertIn(f"released expired lease {a['lease_id']}", self.run_broker("gc").stdout)
+
+    # Review on #55: a reused id is idempotent only for the same request.
+    def test_reused_id_must_match_slot_and_not_be_expired(self):
+        a = self.lease("single", "--id", "named", "--ttl", "1m")
+        p = self.run_broker("lease", "single", "--id", "named", "--slot", str(a["slot"] + 1), ok=False)
+        self.assertIn(f"exists on slot {a['slot']}", p.stderr)
+        again = self.lease("single", "--id", "named", "--ttl", "0")
+        self.assertIsNone(again["expires_at"])                 # the requested ttl is applied
+        self._expire("named")
+        p = self.run_broker("lease", "single", "--id", "named", ok=False)
+        self.assertIn("has expired", p.stderr)
+
+    # Review on #55: each matrix field must name its own repository.
+    def test_pins_check_rejects_swapped_matrix_images(self):
+        pins = (REPO / "pins.toml").read_text()
+        pd = 'pd_image   = "pingcap/pd:v8.5.8@'
+        tk = 'tikv_image = "pingcap/tikv:v8.5.8@'
+        swapped = pins.replace(pd, 'pd_image   = "pingcap/tikv:v8.5.8@').replace(tk, 'tikv_image = "pingcap/pd:v8.5.8@')
+        self.assertNotEqual(swapped, pins)
+        f = self.tmp / "pins.toml"; f.write_text(swapped)
+        p = subprocess.run([str(REPO / "scripts" / "check-pins.sh")], cwd=REPO, text=True,
+                           capture_output=True, env={**os.environ, "PINS": str(f)})
+        self.assertIn("v8.5.8.pd_image", p.stderr + p.stdout)
+        self.assertIn("v8.5.8.tikv_image", p.stderr + p.stdout)
 
     @staticmethod
     def _free(port):

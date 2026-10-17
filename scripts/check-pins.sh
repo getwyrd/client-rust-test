@@ -173,13 +173,13 @@ bad_versions=$(python3 -c "
 import tomllib,pathlib,re
 d=tomllib.loads(pathlib.Path('$PINS').read_text())
 for v,row in (d.get('cluster',{}).get('versions') or {}).items():
-    for f in ('pd_image','tikv_image'):
+    for f,repo in (('pd_image','pd'),('tikv_image','tikv')):
         img=row.get(f,'')
-        if not re.fullmatch(r'pingcap/(pd|tikv):'+re.escape(v)+r'@sha256:[0-9a-f]{64}', img):
+        if not re.fullmatch(r'pingcap/'+repo+':'+re.escape(v)+r'@sha256:[0-9a-f]{64}', img):
             print(f'{v}.{f}={img!r}')
 ")
 if [ -n "$bad_versions" ]; then
-  bad "pins.toml [cluster.versions] entries must be pingcap/<pd|tikv>:<version>@sha256:<digest>:
+  bad "pins.toml [cluster.versions]: pd_image must be pingcap/pd:<version>@sha256:<digest> and tikv_image pingcap/tikv:<version>@sha256:<digest>:
 $bad_versions"
 else
   note "cluster version matrix: $(python3 -c "

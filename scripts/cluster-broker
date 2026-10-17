@@ -185,9 +185,17 @@ def cmd_lease(a) -> int:
     with locked() as leases:
         current = load_all(leases)
         if a.id and a.id in current:
+            # Idempotent only for the SAME request: a reused id must not quietly hand back
+            # a cluster on other ports, or one that has already expired.
             rec = current[a.id]
             if rec["profile"] != a.profile or rec["tikv_version"] != version:
                 fail(f"lease {a.id} exists as {rec['profile']}/{rec['tikv_version']}; release it first")
+            if a.slot is not None and rec["slot"] != a.slot:
+                fail(f"lease {a.id} exists on slot {rec['slot']}, not {a.slot}; release it first")
+            if expired(rec) or rec.get("state") == "releasing":
+                fail(f"lease {a.id} has expired; release it (or run gc) and lease again")
+            rec["expires_at"] = (now() + ttl).isoformat(timespec="seconds") if ttl else None
+            (leases / f"{a.id}.json").write_text(json.dumps(rec, indent=2) + "\n")
             fresh = False
         else:
             taken = {r["slot"] for r in current.values()}
@@ -234,9 +242,13 @@ def cmd_lease(a) -> int:
 
 
 def _release(rec: dict) -> subprocess.CompletedProcess:
+    """Tear the cluster down, and forget the lease only once that worked: a failed `down`
+    keeps the record and env file, so `release` can be retried instead of leaving an
+    orphan the broker no longer knows the slot or configuration of."""
     down = compose(rec, "down", "-v", "--remove-orphans")
-    for suffix in (".json", ".env"):
-        (state_dir() / "leases" / f"{rec['lease_id']}{suffix}").unlink(missing_ok=True)
+    if down.returncode == 0:
+        for suffix in (".json", ".env"):
+            (state_dir() / "leases" / f"{rec['lease_id']}{suffix}").unlink(missing_ok=True)
     return down
 
 
@@ -249,7 +261,8 @@ def cmd_release(a) -> int:
         fail(f"no lease {a.id}")
     down = _release(rec)
     if down.returncode:
-        fail(f"released lease {a.id}, but `compose down` failed:\n{down.stderr.strip()[-1000:]}")
+        fail(f"`compose down` failed for lease {a.id}; the lease is kept, retry `release {a.id}`:\n"
+             f"{down.stderr.strip()[-1000:]}")
     print(f"released {a.id}")
     return 0
 
@@ -261,6 +274,8 @@ def cmd_renew(a) -> int:
         if not f.is_file():
             fail(f"no lease {a.id}")
         rec = json.loads(f.read_text())
+        if rec.get("state") == "releasing":
+            fail(f"lease {a.id} is being released (it expired); lease a new one")
         rec["expires_at"] = (now() + ttl).isoformat(timespec="seconds") if ttl else None
         f.write_text(json.dumps(rec, indent=2) + "\n")
     print(f"renewed {a.id} until {rec['expires_at'] or 'never'}")
@@ -302,9 +317,18 @@ def cmd_logs(a) -> int:
 
 
 def cmd_gc(a) -> int:
+    # Decide AND claim under the lock: a lease is marked `releasing` before the lock is
+    # dropped, and `renew` refuses a releasing lease, so a renewal that wins the race is
+    # never torn down and one that loses it is told so.
     with locked() as leases:
         recs = load_all(leases)
-    gone = [r for r in recs.values() if expired(r)]
+        gone = []
+        for r in recs.values():
+            # An already-`releasing` lease is one whose earlier `down` failed: retry it.
+            if expired(r) or r.get("state") == "releasing":
+                r["state"] = "releasing"
+                (leases / f"{r['lease_id']}.json").write_text(json.dumps(r, indent=2) + "\n")
+                gone.append(r)
     rc = 0
     for r in gone:
         if _release(r).returncode:
