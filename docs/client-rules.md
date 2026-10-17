@@ -46,8 +46,8 @@ Rule ids are stable (`WR-3` stays `WR-3`); new rules append.
 | id | level | rule | evidence | client-rust @ pin |
 |---|---|---|---|---|
 | WR-1 | MUST | Pick exactly one primary key; its lock is *"the source of truth for the state of a transaction"*; all secondary locks point to it. | `kvrpcpb.proto` PrewriteRequest.primary_lock comment (verbatim) | ✅ |
-| WR-2 | MUST | Prewrite everything before committing anything; commit the primary before any secondary. Until the primary commit is durable the transaction must remain rollbackable — this is WR-1's consequence. | oracle `2pc.go` execute ordering | ✅ `transaction.rs:1414` then background secondaries `:1303` |
-| WR-3 | MUST | If the primary commit's outcome is unknowable (e.g. RPC timeout after send), report **undetermined** — never clean failure. The data may be committed. | oracle `2pc.go:2415` setUndeterminedErr | ✅ `UndeterminedError`, `transaction.rs:1295/1406` |
+| WR-2 | MUST | **2PC:** prewrite everything before committing anything; commit the primary before any secondary. Until the primary commit is durable the transaction must remain rollbackable — this is WR-1's consequence. **Async commit / 1PC\*:** once every prewrite has succeeded (1PC: once `one_pc_commit_ts` is returned) the transaction IS committed and must never be rolled back. *(Async-commit / 1PC half added 2026-10-17.)* | oracle `2pc.go` execute ordering; `2pc.go:2045-2046` ("For async commit protocol, the commit is considered success here") | re-grade pending — the ✅ (`transaction.rs:1414`, secondaries `:1303`) was against the 2PC half only |
+| WR-3 | MUST | If the outcome at the commit point is unknowable — **2PC:** the primary commit; **async commit / 1PC\*:** any prewrite — because an RPC was lost after send or TiKV returned `UndeterminedResult`, report **undetermined**, never clean failure, and do no cleanup. The data may be committed. A later error on a retry does not make an earlier lost attempt determined. *(Prewrite, `UndeterminedResult` and retry clauses added 2026-10-17.)* | oracle `2pc.go:2415` setUndeterminedErr; `prewrite.go:355-360` (lost async/1PC prewrite); `commit.go:152-156` (`UndeterminedResult` on the primary) | re-grade pending — the ✅ (`UndeterminedError`, `transaction.rs:1295/1406`) was against the primary-commit RPC case only |
 | WR-4 | MUST | When the client *knows* a transaction failed, its prewritten/pessimistic locks must be actively cleaned up, not abandoned to TTL. | oracle `2pc.go:1643` + `cleanup.go` | ⚠️ explicit `rollback()` only; a failed pessimistic commit left prewrite locks behind — #545, fix #547 in flight |
 | WR-5 | MUST* | Async commit: list all secondaries in the primary's prewrite; adopt the server-derived commit ts; **fall back to 2PC when the server declines** (`min_commit_ts == 0` response). | `kvrpcpb.proto` PrewriteRequest: *"`secondaries` should be set as the key list of all secondary locks"*; oracle `prewrite.go:616` | ❌ no fallback — a `min_commit_ts == 0` response flows unfiltered through `.max()` (`transaction.rs:1364-1371`) into a **silent commit at ts 0** (the FIXME'd `unwrap()` at `:1290` succeeds); roadmap §5.3 |
 | WR-6 | MUST* | 1PC: only for single-region transactions; when the server declines, fall back to 2PC. | `kvrpcpb.proto` try_one_pc comment | ⚠️ disables 1PC when multi-region (`requests.rs:283`) ✅, but returns `OnePcFailure` instead of falling back (`transaction.rs:1356`) |
@@ -84,7 +84,7 @@ Rule ids are stable (`WR-3` stays `WR-3`); new rules append.
 
 | id | level | rule | evidence | client-rust @ pin |
 |---|---|---|---|---|
-| LR-1 | MUST | A foreign lock is resolved through its **primary**: `CheckTxnStatus` on the primary decides — locked (`lock_ttl > 0`), committed (`commit_version > 0`), and rolled back (both zero) **only when the response's `action` confirms a rollback record** (`NoAction`, `LockNotExistRollback`, `TtlExpireRollback`). With `LockNotExistDoNothing` or `TtlExpirePessimisticRollback` (a pessimistic lock) TiKV writes no record and the transaction may still be alive, since it can move its primary (pingcap/tidb#42937): the status is undetermined, never cached and never resolved as rolled back. *(Rule corrected 2026-10-17: it previously read "rolled back (both zero)" without the `action` condition.)* | `kvrpcpb.proto:332-335` (response comment); oracle `lock_resolver.go:139-147` (`IsRolledBack`, `IsStatusDetermined`) | ✅ `lock.rs:426/527` — *graded at `e53837d` against the shorter rule and not re-derived; since #561 client-rust checks `action` (`TransactionStatus::is_determined`, `requests.rs:744-765`)* |
+| LR-1 | MUST | A foreign lock is resolved through its **primary**: `CheckTxnStatus` on the primary decides — locked (`lock_ttl > 0`), committed (`commit_version > 0`), and rolled back (both zero) **only when the response's `action` confirms a rollback record** (`NoAction`, `LockNotExistRollback`, `TtlExpireRollback`). With `LockNotExistDoNothing` or `TtlExpirePessimisticRollback` (a pessimistic lock) TiKV writes no record and the transaction may still be alive, since it can move its primary (pingcap/tidb#42937): the status is undetermined, never cached and never resolved as rolled back. Those actions only occur because `CheckTxnStatus` for a pessimistic lock sets `resolving_pessimistic_lock`; that lock is then cleaned with `PessimisticRollback` of the lock itself, never with `ResolveLock`. *(Rule corrected 2026-10-17: it previously read "rolled back (both zero)" without the `action` condition.)* | `kvrpcpb.proto:332-335` (response comment); oracle `lock_resolver.go:139-147` (`IsRolledBack`, `IsStatusDetermined`) | ❌ at `e53837d`: every both-zero answer became `RolledBack`, was cached whatever the action, and fed `ResolveLock(commit_version = 0)` (`lock.rs:113-114, :394`; `requests.rs:737-739`), so a `LockNotExistDoNothing` led to a rollback. Fixed upstream by #561 (`TransactionStatus::is_determined`, `requests.rs:744-765`) — the grade is at this document's pin, `e53837d` |
 | LR-2 | MUST | Never roll back a lock before its TTL expires unless the transaction's status is already known — `caller_start_ts`/`current_ts` exist to make expiry checks honest. | `kvrpcpb.proto:302-306` | ✅ |
 | LR-3 | MUST | An expired primary with no lock and no write record is escalated with `rollback_if_not_exist`, leaving a rollback tombstone — otherwise the orphan is immortal. | `kvrpcpb.proto:307-309`; oracle `lock_resolver.go:1001` | ❌ at pin — escalation is dead code (**G-0001**, #543); fix #544 in flight |
 | LR-4 | MUST | Async-commit locks are never unilaterally rolled back: resolve by checking all secondaries (`CheckSecondaryLocks`), then commit or roll back *by the actual outcome*. | `kvrpcpb.proto` LockInfo.use_async_commit/secondaries; oracle `lock_resolver.go:1271` | ⚠️ correct half (never unilateral) ✅; resolving half exists only on the GC path (`lock.rs:336-380`) — reads just wait (`lock.rs:117`); roadmap §5.7 |
@@ -149,12 +149,19 @@ client-rust at the pin, across 56 rules (31 MUST — one n/a — 15 SHOULD, 10 C
 
 |  | MUST (incl. conditional) | SHOULD | CAN |
 |---|---|---|---|
-| ✅ complies | 18 | 6 | — |
+| ✅ complies | 15 | 6 | — |
 | ⚠️ partial / mixed | 7 (TS-2, WR-4, WR-6, PL-2, LR-4, RE-3, ER-3) | 1 (PL-5) | 3 (PL-6, RAW-4, NET-4) |
-| ❌ gap | **5 (WR-5, WR-7, LR-3, RE-2, GC-2)** | 8 | 7 |
+| ❌ gap | **6 (WR-5, WR-7, LR-1, LR-3, RE-2, GC-2)** | 8 | 7 |
+| re-grade pending (rule corrected 2026-10-17) | 2 (WR-2, WR-3) | — | — |
 | n/a (capability absent) | 1 (RD-3) | — | — |
 
-The five MUST-❌ rows are the priority queue, and the roadmap carries all five:
+*Counts changed 2026-10-17 when an audit corrected LR-1, WR-2 and WR-3 against client-go and
+kvproto: LR-1 was ❌ at `e53837d` under the correct rule; WR-2 and WR-3 had been graded against
+narrower wording and are not re-derived here. The remaining audit findings are tracked in
+getwyrd/client-rust-test#62.*
+
+The six MUST-❌ rows are the priority queue. LR-1 is already fixed upstream by #561, which
+the pin move to `3408d95` brings in; the roadmap carries the other five:
 WR-5/WR-7 (roadmap §5.3), LR-3 (G-0001, fix #544 in flight), GC-2 (roadmap §5.8), and
 RE-2 — a finding surfaced by writing this document: `ServerIsBusy` (which ships a
 suggested `backoff_ms`) and `MaxTimestampNotSynced` ("client can backoff and resend")

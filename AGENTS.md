@@ -53,10 +53,15 @@ wins and this line is a defect.
 - **TS-2** — `commit_ts > start_ts`, always.
 - **WR-1** — exactly one primary key; its lock is the source of truth for the transaction,
   and every secondary lock points to it.
-- **WR-2** — prewrite everything before committing anything; commit the primary before any
-  secondary; until the primary commit is durable the transaction stays rollbackable.
-- **WR-3** — if the primary commit's outcome is unknowable (e.g. an RPC timeout after
-  send), report *undetermined*, never clean failure.
+- **WR-2** — 2PC: prewrite everything before committing anything; commit the primary
+  before any secondary; until the primary commit is durable the transaction stays
+  rollbackable. Async commit / 1PC\*: once every prewrite has succeeded (1PC: once a
+  `one_pc_commit_ts` is returned) the transaction IS committed and must never be rolled
+  back, whatever happens to the commit phase that follows.
+- **WR-3** — if the outcome at the commit point is unknowable — 2PC: the primary commit;
+  async commit / 1PC\*: any prewrite — because an RPC was lost after send or TiKV returned
+  `UndeterminedResult`, report *undetermined*, never clean failure, and do no cleanup. A
+  later error on a retry does not make an earlier lost attempt determined.
 - **WR-4** — when the client knows a transaction failed, its prewritten and pessimistic
   locks are actively cleaned up, not abandoned to TTL.
 - **WR-5\*** — async commit: list **all** secondaries in the primary's prewrite; adopt the
@@ -83,7 +88,9 @@ wins and this line is a defect.
   `TtlExpirePessimisticRollback` (a pessimistic lock) TiKV writes no record and the
   transaction may still be alive — it can move its primary (pingcap/tidb#42937) — so the
   status is undetermined: never cached, never resolved as rolled back (client-go
-  `TxnStatus.IsRolledBack` / `IsStatusDetermined`).
+  `TxnStatus.IsRolledBack` / `IsStatusDetermined`). Those actions only occur because
+  `CheckTxnStatus` for a pessimistic lock sets `resolving_pessimistic_lock`; that lock is
+  then cleaned with `PessimisticRollback` of the lock itself, never with `ResolveLock`.
 - **LR-2** — never roll back a lock before its TTL expires unless the transaction's status
   is already known.
 - **LR-3** — an expired primary with no lock and no write record is escalated with
