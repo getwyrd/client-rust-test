@@ -133,6 +133,14 @@ revision, and every run stamps what was actually exercised
 when the two disagree, so a result can never quietly be about a different tree than
 it claims.
 
+**Which client-rust?** The fork's `integration` branch
+([ADR-0001](docs/design/adr/0001-pin-follows-the-integration-branch.md)): upstream
+tikv/client-rust plus the getwyrd PRs still waiting upstream. `make pins-check` asserts
+the pin is a commit of that branch and that its `upstream_base` is on upstream
+`master`, so every gap is still stated and filed against tikv/client-rust. CI also runs
+the parity diff at `upstream_base` — informational, never gating — to show which gaps
+are still open upstream.
+
 ## Usage
 
 ```sh
@@ -145,7 +153,7 @@ make unit-test      # cluster-free tests (prefix math, error classification)
 make verdict        # the gate, checked against the verdict EXPECTED at the pin
 make gate-test      # the cluster-backed gate, raw ($PD_ADDRS, default 127.0.0.1:2379)
 make failpoint-test # the failpoint proof (opt-in `failpoints` feature)
-make pins-check     # pins.toml agrees with everything, and names an upstream commit
+make pins-check     # pins.toml agrees with everything; the pin is on integration, on upstream
 make check          # fmt --check, clippy -D warnings, cargo check, broker tests
 ```
 
@@ -154,7 +162,7 @@ meaningless here: the harness carries no workarounds for client bugs, so a
 deficiency is a **failing test**, and the verdict declares which tests are expected red
 at the pinned revision. It requires each expected-red test to fail **on its own
 assertion**, and fails loudly if one ever passes — that is how you find out the day a gap
-is fixed upstream. At the current pin the expected-red list is empty: the two findings that
+is fixed at the pin (upstream, or in a fork PR on `integration`). At the current pin the expected-red list is empty: the two findings that
 kept `d6` and `d7` red are fixed upstream, and both tests now guard against a regression.
 
 The cluster ([`cluster/`](cluster/)) is a throwaway single-node PD + TiKV with
@@ -183,16 +191,18 @@ alike, and with a bridge network no single address reaches both, so isolation co
 ports, not networks. Profiles: `single`, `3store` (`chaos` arrives with the chaos tier).
 State lives in `$PARITY_BROKER_DIR` (default `~/.local/state/parity-broker`).
 
-## Gate verdict (v8.5.5 cluster, client-rust `master` @ 3408d95)
+## Gate verdict (v8.5.5 cluster, client-rust `integration` @ b10bc69)
 
-> At `3408d95` (upstream `master`, 2026-10-17) the gate is **all green**, `d6` and `d7`
-> included, and the ledger holds: G-0001 is FIXED and asserted to **agree**, G-0002 still
-> diverges as declared. Confirm the checkout with
+> At `b10bc69` (the fork's `integration`, 2026-10-17: upstream `master` @ `3408d95` plus
+> tikv/client-rust#557, #551 and #558, and the fork's `AGENTS.md`) the gate is **all
+> green**, `d6` and `d7` included, and the ledger holds: G-0001 is FIXED and asserted to
+> **agree**, G-0002 still diverges as declared. The upstream view at `3408d95` agrees
+> with it. Confirm the checkout with
 > `git -C ../client-rust describe --tags --always --dirty`. What changed since the
-> previous pin: the orphaned-lock fix landed inside tikv/client-rust#561's `resolve_locks`
-> rework (our #544 closed as superseded), and the pessimistic-rollback fix as #547.
-> Evidence: [`findings/gate-evidence-3408d95.txt`](findings/gate-evidence-3408d95.txt)
-> (full `make verdict` and `make ledger` output at this pin).
+> previous pin: the subject moved from upstream `master` to `integration` (ADR-0001);
+> the three fork PRs moved no verdict and no ledger claim.
+> Evidence: [`findings/gate-evidence-b10bc69.txt`](findings/gate-evidence-b10bc69.txt)
+> (full `make verdict` and `make ledger` output at this pin, and the upstream view).
 
 **Confirmed working** — the proposal's mapping is implementable as specified:
 
@@ -291,6 +301,15 @@ fixed in client-rust.
 (A fourth candidate — "`snapshot()` needs explicit `.read_only()` or drops
 panic" — did **not** survive verification: `TransactionClient::snapshot`
 applies `.read_only()` internally, client.rs:230. Retracted.)
+
+### History: the verdict at `3408d95`
+
+> The last pin on upstream `master` (tikv/client-rust#561, 2026-10-17), before the
+> subject moved to `integration`. The gate was **all green**, `d6` and `d7` included, and
+> the ledger held: G-0001 FIXED and asserted to agree, G-0002 diverging as declared.
+> Against `e53837d`, the orphaned-lock fix had landed inside #561's `resolve_locks`
+> rework (our #544 closed as superseded), and the pessimistic-rollback fix as #547.
+> Evidence: [`findings/gate-evidence-3408d95.txt`](findings/gate-evidence-3408d95.txt).
 
 ### History: the verdict at `e53837d`
 

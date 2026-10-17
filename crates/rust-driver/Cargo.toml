@@ -29,3 +29,12 @@ libc = "0.2"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio.workspace = true
+
+# Build against a client-rust WITHOUT #557 (getwyrd/client-rust integration carries it;
+# upstream does not yet). #557 replaced `Error::ExtractedErrors` with
+# `Error::MultipleRegionErrors`, and `mapping.rs` matches `Error` exhaustively, so one
+# source cannot compile against both. CI's informational run at pins.toml
+# `upstream_base` turns this on (ADR-0001). Delete it once upstream_base includes #557 —
+# its build then fails to compile, which is the reminder.
+[features]
+pre-557 = []

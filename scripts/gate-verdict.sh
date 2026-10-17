@@ -10,7 +10,7 @@
 # Hence the table below and its two rules:
 #
 #   XFAIL  an expected-red test failed  -> correct; the gap is still open.
-#   XPASS  an expected-red test PASSED  -> HARD FAILURE. The gap closed upstream,
+#   XPASS  an expected-red test PASSED  -> HARD FAILURE. The gap closed at the pin,
 #          so the pin, the README verdict, and (later) the ledger are all stale.
 #
 # The XPASS rule is the important one. Without it the harness would quietly rot
@@ -95,8 +95,9 @@ The gap appears to be CLOSED at the pinned revision. That is good news, and it i
 a hard failure on purpose: the pin, the README's verdict, and the ledger entry for
 this gap are now stale and must be re-stated.
 
-  1. confirm the fix merged upstream (tikv/client-rust)
-  2. bump pins.toml client_rust.rev to a commit that contains it
+  1. find the fix: on the fork's integration branch, and whether it has merged upstream
+     (tikv/client-rust) yet — CI's informational upstream_base run shows the latter
+  2. make sure pins.toml client_rust.rev is an integration commit that contains it
   3. drop this row from the XFAIL table and flip the ledger table to FIXED
 EOF
     rc=1

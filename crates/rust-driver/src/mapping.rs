@@ -9,8 +9,8 @@
 //!    `proto`. A mapping call can always be overturned from the evidence.
 //! 2. **`native` is ALWAYS attached.** If this table maps two different facts onto one
 //!    class, the trace still contains the difference and a ledger claim can opt into
-//!    diffing `native.type`. Finding 1 lives exactly there: `MultipleKeyErrors` vs
-//!    `ExtractedErrors` is the whole bug, and both are `Class::TxnNotFound`.
+//!    diffing `native.type`. Finding 1 lived exactly there: `MultipleKeyErrors` vs
+//!    `ExtractedErrors` was the whole bug, and both are `Class::TxnNotFound`.
 //! 3. **The match below is EXHAUSTIVE** — no `_ =>` arm over `tikv_client::Error`. When
 //!    upstream adds a variant, this file stops compiling. A mapping table that can
 //!    silently ignore a new error is not a mapping table.
@@ -54,7 +54,11 @@ pub fn classify(err: &Error) -> Observation {
 /// How many per-key errors the client surfaced, if it surfaced a set of them.
 fn error_count(err: &Error) -> Option<usize> {
     match err {
-        Error::MultipleKeyErrors(errs) | Error::ExtractedErrors(errs) => Some(errs.len()),
+        Error::MultipleKeyErrors(errs) => Some(errs.len()),
+        #[cfg(not(feature = "pre-557"))]
+        Error::MultipleRegionErrors(errs) => Some(errs.len()),
+        #[cfg(feature = "pre-557")]
+        Error::ExtractedErrors(errs) => Some(errs.len()),
         Error::PessimisticLockError { inner, .. } => error_count(inner),
         _ => None,
     }
@@ -72,29 +76,18 @@ fn classify_inner(err: &Error) -> (Class, Option<serde_json::Value>) {
         // client reporting 1-of-3 where the other reports 3-of-3 is a VISIBLE
         // difference, and collapsing it would hide exactly the divergence we hunt.
         //
-        // These two variants were the crux of finding 1. Until tikv/client-rust#561,
-        // `check_txn_status` matched only `ExtractedErrors`, but the plan shape
-        // (retry_multi_region -> merge -> extract_error) could only deliver
-        // `MultipleKeyErrors` — so the `rollback_if_not_exist` heal path was dead code.
-        // They map to the SAME class (the underlying fact is the same), and
-        // `native.type` preserves the distinction that WAS the bug.
-        Error::MultipleKeyErrors(errs) | Error::ExtractedErrors(errs) => {
-            let parts: Vec<Class> = errs.iter().map(|e| classify_inner(e).0).collect();
-            match parts.as_slice() {
-                [] => (
-                    Class::Internal {
-                        detail: "an empty multi-key error carries no fact at all".to_owned(),
-                    },
-                    None,
-                ),
-                // All members agree: report the single fact, not a one-element `mixed`.
-                [first, rest @ ..] if rest.iter().all(|c| c == first) => {
-                    let proto = errs.first().and_then(|e| classify_inner(e).1);
-                    (first.clone(), proto)
-                }
-                _ => (Class::Mixed { parts }, None),
-            }
-        }
+        // `MultipleKeyErrors` vs `ExtractedErrors` was the crux of finding 1. Until
+        // tikv/client-rust#561, `check_txn_status` matched only `ExtractedErrors`, but
+        // the plan shape (retry_multi_region -> merge -> extract_error) could only
+        // deliver `MultipleKeyErrors` — so the `rollback_if_not_exist` heal path was
+        // dead code. #557 then removed `ExtractedErrors` and added
+        // `MultipleRegionErrors`, whose members are all region errors. Every one of
+        // them is classified by its members, and `native.type` keeps the variant.
+        Error::MultipleKeyErrors(errs) => classify_multi(errs),
+        #[cfg(not(feature = "pre-557"))]
+        Error::MultipleRegionErrors(errs) => classify_multi(errs),
+        #[cfg(feature = "pre-557")]
+        Error::ExtractedErrors(errs) => classify_multi(errs),
 
         // The pessimistic-lock wrapper. The inner error is the fact; unwrap it, or a
         // write conflict surfaced through a lock request would be unclassifiable —
@@ -197,6 +190,27 @@ fn classify_inner(err: &Error) -> (Class, Option<serde_json::Value>) {
     }
 }
 
+/// A set of errors. Deliberately NOT flattened to a "primary" error: a client reporting
+/// 1-of-3 where the other reports 3-of-3 is a VISIBLE difference, and collapsing it
+/// would hide exactly the divergence we hunt.
+fn classify_multi(errs: &[Error]) -> (Class, Option<serde_json::Value>) {
+    let parts: Vec<Class> = errs.iter().map(|e| classify_inner(e).0).collect();
+    match parts.as_slice() {
+        [] => (
+            Class::Internal {
+                detail: "an empty multi-error carries no fact at all".to_owned(),
+            },
+            None,
+        ),
+        // All members agree: report the single fact, not a one-element `mixed`.
+        [first, rest @ ..] if rest.iter().all(|c| c == first) => {
+            let proto = errs.first().and_then(|e| classify_inner(e).1);
+            (first.clone(), proto)
+        }
+        _ => (Class::Mixed { parts }, None),
+    }
+}
+
 /// Read the fact straight off `kvrpcpb::KeyError` — the same proto client-go decodes.
 fn classify_key_error(ke: &ProtoKeyError) -> (Class, Option<serde_json::Value>) {
     if let Some(c) = &ke.conflict {
@@ -296,9 +310,12 @@ fn variant_name(err: &Error) -> &'static str {
         Error::RegionError(_) => "RegionError",
         Error::UndeterminedError(_) => "UndeterminedError",
         Error::KeyError(_) => "KeyError",
-        // THE two that finding 1 turns on. Same class, different name — and the name
-        // is the evidence.
+        // Finding 1 turned on MultipleKeyErrors vs ExtractedErrors: same class,
+        // different name — and the name was the evidence.
+        #[cfg(feature = "pre-557")]
         Error::ExtractedErrors(_) => "ExtractedErrors",
+        #[cfg(not(feature = "pre-557"))]
+        Error::MultipleRegionErrors(_) => "MultipleRegionErrors",
         Error::MultipleKeyErrors(_) => "MultipleKeyErrors",
         Error::ColumnFamilyError(_) => "ColumnFamilyError",
         Error::JoinError(_) => "JoinError",
@@ -350,6 +367,7 @@ mod tests {
         assert_eq!(obs.native.unwrap().r#type, "KeyError");
     }
 
+    #[cfg(feature = "pre-557")]
     #[test]
     fn multiple_and_extracted_share_a_class_but_not_a_native_type() {
         // THE finding-1 invariant, and the whole reason `native` exists.
@@ -369,6 +387,18 @@ mod tests {
 
         assert_eq!(multi.native.unwrap().r#type, "MultipleKeyErrors");
         assert_eq!(extracted.native.unwrap().r#type, "ExtractedErrors");
+    }
+
+    #[cfg(not(feature = "pre-557"))]
+    #[test]
+    fn multiple_region_errors_classify_by_their_members() {
+        // #557: a set of region errors is a cluster event like a lone one, so the run
+        // is inadmissible and retried. The count and the variant name survive.
+        let region = || Error::RegionError(Box::default());
+        let obs = classify(&Error::MultipleRegionErrors(vec![region(), region()]));
+        assert_eq!(obs.class, Class::RegionError);
+        assert_eq!(obs.error_count, Some(2));
+        assert_eq!(obs.native.unwrap().r#type, "MultipleRegionErrors");
     }
 
     #[test]

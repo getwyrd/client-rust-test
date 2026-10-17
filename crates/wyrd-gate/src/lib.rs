@@ -314,9 +314,7 @@ pub fn is_lost_race(err: &tikv_client::Error) -> bool {
         // key error, and `all` would misreport pure contention as a fault.
         // The masking risk (a real fault hidden beside a conflict) is handled
         // observably by `warn_if_masking_fault`, not by changing this rule.
-        Error::MultipleKeyErrors(errors) | Error::ExtractedErrors(errors) => {
-            errors.iter().any(is_lost_race)
-        }
+        Error::MultipleKeyErrors(errors) => errors.iter().any(is_lost_race),
         _ => false,
     }
 }
@@ -329,9 +327,7 @@ pub fn is_lost_race(err: &tikv_client::Error) -> bool {
 fn warn_if_masking_fault(stage: &str, err: &tikv_client::Error) {
     use tikv_client::Error;
     let masked = match err {
-        Error::MultipleKeyErrors(errors) | Error::ExtractedErrors(errors) => {
-            errors.iter().any(|e| !is_lost_race(e))
-        }
+        Error::MultipleKeyErrors(errors) => errors.iter().any(|e| !is_lost_race(e)),
         _ => false,
     };
     if masked {

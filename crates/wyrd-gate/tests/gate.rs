@@ -1046,8 +1046,9 @@ async fn d5_woken_lock_waiter_surfaces_a_classifiable_write_conflict() {
 /// orphaned lock whose primary has no record. A correct client resolves this
 /// on the next read once the lock's TTL has expired
 /// (`get_txn_status_from_lock` escalates to `rollback_if_not_exist`). In
-/// unfixed client-rust that heal path is unreachable — `check_txn_status`
-/// matches `Error::ExtractedErrors` but the plan delivers the key error as
+/// unfixed client-rust (before #561) that heal path was unreachable —
+/// `check_txn_status` matched `Error::ExtractedErrors` (removed by #557 since) but
+/// the plan delivered the key error as
 /// `Error::MultipleKeyErrors` — so the key stays unreadable forever
 /// (`MultipleKeyErrors([KeyError { txn_not_found }])`), and this test's
 /// post-TTL read fails.

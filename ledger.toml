@@ -47,8 +47,8 @@ schema = "parity-ledger/v1"
 # Filed upstream as tikv/client-rust#543. Our fix PR #544 was superseded by #561
 # ("recover expired async commit locks", 3408d95): a wider rework of `resolve_locks` that
 # includes #544's match-arm change in `check_txn_status` and an equivalent unit test;
-# #544 and #543 are closed. At the
-# pin 3408d95 the two clients AGREE, so this entry asserts that they keep agreeing.
+# #544 and #543 are closed. The two clients AGREE at 3408d95 and at the pin b10bc69
+# (integration), so this entry asserts that they keep agreeing.
 # ══════════════════════════════════════════════════════════════════════════════════════
 [[gap]]
 id     = "G-0001"

@@ -18,9 +18,9 @@
 //! | `proto`  | the `kvrpcpb` message as JSON                  | presence + type only; fields opt-in |
 //! | `native` | the client's OWN taxonomy, verbatim            | **never** — but always *printed* |
 //!
-//! `native` is why this papers over nothing. Finding 1 IS a native-taxonomy bug:
-//! `check_txn_status` matches `Error::ExtractedErrors` but the plan shape only ever
-//! delivers `Error::MultipleKeyErrors`. Both are `Class::TxnNotFound` — the same
+//! `native` is why this papers over nothing. Finding 1 WAS a native-taxonomy bug: until
+//! tikv/client-rust#561, `check_txn_status` matched `Error::ExtractedErrors` but the plan
+//! shape only ever delivered `Error::MultipleKeyErrors`. Both are `Class::TxnNotFound` — the same
 //! *fact* — so a class-only diff would show them as identical and the bug would be
 //! invisible. Keeping `native.type` means a claim can opt into diffing precisely the
 //! distinction that IS the defect.
