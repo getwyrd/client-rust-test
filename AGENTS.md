@@ -77,8 +77,13 @@ wins and this line is a defect.
   `DataIsNotReady`, retry elsewhere or fall back to the leader — never serve the read
   anyway.
 - **LR-1** — a foreign lock is resolved through its primary: `CheckTxnStatus` on the primary
-  decides, with an exact tri-state decode — locked (`lock_ttl > 0`), committed
-  (`commit_version > 0`), rolled back (both zero).
+  decides. Locked is `lock_ttl > 0`, committed is `commit_version > 0`, and both zero is
+  rolled back **only** when the response's `action` confirms a rollback record (`NoAction`,
+  `LockNotExistRollback`, `TtlExpireRollback`). With `LockNotExistDoNothing` or
+  `TtlExpirePessimisticRollback` (a pessimistic lock) TiKV writes no record and the
+  transaction may still be alive — it can move its primary (pingcap/tidb#42937) — so the
+  status is undetermined: never cached, never resolved as rolled back (client-go
+  `TxnStatus.IsRolledBack` / `IsStatusDetermined`).
 - **LR-2** — never roll back a lock before its TTL expires unless the transaction's status
   is already known.
 - **LR-3** — an expired primary with no lock and no write record is escalated with
