@@ -21,8 +21,9 @@ networking on its own block of ports (`slot`). Slot 0 is the classic block (PD 2
 TiKV 20160..) that `make cluster-up` and CI use; leases the broker allocates itself take
 slots 1..N, so a human cluster and loop leases never collide.
 
-Profiles: `single` (cluster/docker-compose.yml) and `3store`
-(cluster/docker-compose-3store.yml). `chaos` arrives with the chaos tier (design WP-10).
+Profiles: `single` (cluster/docker-compose.yml), `3store`
+(cluster/docker-compose-3store.yml) and `upstream` (cluster/docker-compose-upstream.yml:
+client-rust's own CI shape, for its integration suites). `chaos` arrives with the chaos tier (design WP-10).
 Versions: the default pin and every `[cluster.versions]` entry in pins.toml.
 
 State lives in $PARITY_BROKER_DIR (default $XDG_STATE_HOME/parity-broker, i.e.
@@ -55,6 +56,7 @@ REPO = Path(__file__).resolve().parents[1]
 PROFILES = {
     "single": {"compose": "cluster/docker-compose.yml", "stores": 1},
     "3store": {"compose": "cluster/docker-compose-3store.yml", "stores": 3},
+    "upstream": {"compose": "cluster/docker-compose-upstream.yml", "stores": 3},
 }
 NOT_YET = {"chaos": "the chaos profile arrives with the chaos tier (client-rust-loop-design WP-10)"}
 PROJECT_PREFIX = "crt-"
