@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -56,6 +57,8 @@ class Scratch(unittest.TestCase):
         for d in (self.h, self.cr):
             git(d, "add", "-A")
             git(d, "commit", "-q", "-m", "init")
+        # The harness's base: candidate mode judges the other gaps by the ledger there.
+        git(self.h, "update-ref", "refs/remotes/origin/main", "HEAD")
         self.results = self.h / "results"
         shutil.copytree(FIXTURE, self.results, ignore=shutil.ignore_patterns("README.md"))
         self.stamp()
@@ -70,8 +73,11 @@ class Scratch(unittest.TestCase):
     def stamp(self):
         """Point the fixture's digests at the scratch trees, as a fresh candidate run would."""
         hd, cd = digest(self.h), digest(self.cr)
+        base = subprocess.run(["git", "-C", str(self.h), "rev-parse", "origin/main"],
+                              check=True, capture_output=True, text=True).stdout.strip()
 
         def fn(p):
+            p["candidate"]["harness"]["base"] = base
             p["candidate"]["harness"]["digest"] = hd
             p["candidate"]["client_rust"]["digest"] = cd
         self.edit_results(fn)
@@ -91,6 +97,19 @@ class Scratch(unittest.TestCase):
 
     def verdict(self):
         return json.loads((self.results / "candidate-verdict.json").read_text())
+
+    def edit_ledger(self, fn):
+        """Rewrite one [[gap]] block of the scratch ledger.toml, then re-stamp."""
+        led = self.h / "ledger.toml"
+        parts = re.split(r"(?m)^(?=\[\[gap\]\])", led.read_text())
+        led.write_text("".join(fn(part) for part in parts))
+        self.stamp()
+
+    def break_g0001(self):
+        f = self.results / "divergence.orphaned-lock-resolution.json"
+        d = json.loads(f.read_text())
+        d["divergences"] = [{"step": "s", "path": "p", "oracle": "a", "subject": "b"}]
+        f.write_text(json.dumps(d))
 
 
 class LedgerCheckCandidate(Scratch):
@@ -114,15 +133,71 @@ class LedgerCheckCandidate(Scratch):
         self.assertNotIn("flip this entry", r.stderr)
 
     def test_another_gap_breaking_fails_but_still_writes_the_verdict(self):
-        f = self.results / "divergence.orphaned-lock-resolution.json"
-        d = json.loads(f.read_text())
-        d["divergences"] = [{"step": "s", "path": "p", "oracle": "a", "subject": "b"}]
-        f.write_text(json.dumps(d))
+        self.break_g0001()
         r = self.candidate()
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("G-0001 NEW GAP", r.stderr)
         v = self.verdict()
         self.assertEqual((v["outcome"], v["others_hold"]), ("XDIVERGE", False))
+
+    def test_records_what_the_change_did_to_the_harness(self):
+        v = (self.candidate(), self.verdict())[1]
+        self.assertEqual((v["declared_entry"], v["harness_changed_files"]), ("unchanged", []))
+        self.edit_ledger(lambda b: b.replace('status = "OPEN"', 'status = "OPEN" # edited')
+                         if 'id     = "G-0002"' in b else b)
+        r = self.candidate()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        v = self.verdict()
+        self.assertEqual((v["declared_entry"], v["harness_changed_files"]), ("unchanged", ["ledger.toml"]))
+        self.edit_ledger(lambda b: b.replace('status = "OPEN" # edited', 'status = "FIXED"'))
+        self.candidate()
+        self.assertEqual(self.verdict()["declared_entry"], "changed")
+
+    def test_the_change_cannot_delete_a_gap_it_breaks(self):
+        # The review's reproduction: break G-0001 and drop its entry in the same change.
+        self.break_g0001()
+        self.edit_ledger(lambda b: "" if 'id     = "G-0001"' in b else b)
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("the change removes G-0001", r.stderr)
+
+    def test_the_change_cannot_restate_another_gap(self):
+        self.edit_ledger(lambda b: b.replace('expect   = "agrees"', 'expect   = "diverges"'))
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("the change edits the entry for G-0001", r.stderr)
+
+    def test_the_change_cannot_edit_another_gaps_scenario(self):
+        f = self.h / "scenarios" / "orphaned-lock-resolution.json"
+        f.write_text(f.read_text() + "\n")
+        self.stamp()
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("the scenario of G-0001", r.stderr)
+
+    def test_the_change_cannot_add_a_second_gap(self):
+        self.edit_ledger(lambda b: b + b.replace('"G-0001"', '"G-0099"')
+                         if 'id     = "G-0001"' in b else b)
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("adds G-0099, which is not the declared gap", r.stderr)
+
+    def test_refuses_results_from_another_base(self):
+        self.edit_results(lambda p: p["candidate"]["harness"].update(base="0" * 40))
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("the claims it was judged against have moved", r.stderr)
+
+    def test_needs_a_base(self):
+        git(self.h, "update-ref", "-d", "refs/remotes/origin/main")
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no merge-base with origin/main", r.stderr)
+
+    def test_verdict_provenance_is_the_checked_one(self):
+        (self.results / "provenance.json").write_text('{"candidate": "stale"}')
+        self.assertEqual(self.candidate().returncode, 0)
+        self.assertEqual(self.verdict()["provenance"]["client_rust"]["digest"], digest(self.cr))
 
     def test_needs_a_declared_gap(self):
         self.assertEqual(self.check(PARITY_MODE="candidate").returncode, 2)
@@ -213,10 +288,19 @@ class Provenance(Scratch):
         self.assertEqual(r.returncode, 1)
         self.assertIn("cargo builds the crate under test from", r.stderr)
 
-    def test_the_same_tree_by_another_spelling_is_accepted_past_that_check(self):
-        r = self.run_script("provenance.sh", CLIENT_RUST=str(self.cr), PARITY_MODE="bogus")
-        # The CLIENT_RUST check passed; the run then stops on the bad mode, before any I/O.
-        self.assertNotIn("cargo builds the crate under test from", r.stderr)
+    def test_the_same_tree_by_another_spelling_is_accepted(self):
+        for spelling in (str(self.cr), "../client-rust/", "./../client-rust"):
+            r = self.run_script("provenance.sh", CLIENT_RUST=spelling, PARITY_MODE="advisory",
+                                PD_ADDRS="127.0.0.1:9")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("cargo builds the crate under test from", r.stderr)
+
+    def test_candidate_refuses_when_cargo_cannot_confirm_the_tree(self):
+        # The scratch workspace names member crates it does not have, so `cargo metadata`
+        # fails: candidate mode must refuse rather than digest a tree it cannot tie to the build.
+        r = self.run_script("provenance.sh", PARITY_MODE="candidate", PD_ADDRS="127.0.0.1:9")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("cargo builds tikv-client from", r.stderr)
 
     def test_mode_conflicts_and_typos_are_refused(self):
         r = self.run_script("provenance.sh", PARITY_STRICT="1", PARITY_MODE="candidate")
@@ -246,6 +330,22 @@ class TreeDigest(Scratch):
         self.assertEqual(digest(self.cr), base)
         (self.cr / "src" / "lib.rs").unlink()
         self.assertNotEqual(digest(self.cr), base, "a deleted tracked file must count")
+
+    def test_only_gitignore_decides_what_is_left_out(self):
+        base = digest(self.cr)
+        (self.cr / ".git" / "info").mkdir(exist_ok=True)
+        (self.cr / ".git" / "info" / "exclude").write_text("hidden.rs\n")
+        (self.cr / "src" / "hidden.rs").write_text("")
+        self.assertNotEqual(digest(self.cr), base, ".git/info/exclude must not hide a file")
+
+    def test_refuses_a_symlink_out_of_the_tree(self):
+        (self.cr / "src" / "inside.rs").symlink_to("lib.rs")
+        digest(self.cr)  # inside the tree: fine
+        (self.cr / "src" / "outside.rs").symlink_to(self.tmp / "elsewhere.rs")
+        r = subprocess.run([sys.executable, "-I", str(DIGEST), str(self.cr)],
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("symlink out of the tree", r.stderr)
 
     def test_writes_nothing_into_the_repository(self):
         (self.cr / "src" / "new.rs").write_text("fn x() {}\n")

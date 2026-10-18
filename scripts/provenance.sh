@@ -105,6 +105,21 @@ if [ "$MODE" = candidate ]; then
   if [ "$rev" != unknown ] && git -C "$CLIENT_RUST" merge-base --is-ancestor "$PIN_REV" HEAD 2>/dev/null; then
     contains_pin=true
   fi
+  # Cargo.toml's path is what cargo builds only while nothing overrides it, and a
+  # candidate may change the harness: a `[patch]` or a member's own `path =` would make
+  # cargo build another tree than the one digested here. So ask cargo.
+  cargo_built=$(cargo metadata --format-version 1 --offline 2>/dev/null | python3 -c "
+import json,os,sys
+ps=[p for p in json.load(sys.stdin)['packages'] if p['name']=='tikv-client']
+print(os.path.dirname(ps[0]['manifest_path']) if len(ps)==1 else '')") || cargo_built=""
+  if [ "$(realpath -m "${cargo_built:-/nonexistent}")" != "$(realpath -m "$CLIENT_RUST")" ]; then
+    cat >&2 <<EOF
+REFUSING TO RUN: cargo builds tikv-client from '${cargo_built:-(cargo metadata failed, or found more than one tikv-client)}',
+not from $CLIENT_RUST (Cargo.toml). A candidate digest of $CLIENT_RUST would describe a
+tree that never ran. Remove the override, or run \`cargo metadata --offline\` to see why.
+EOF
+    exit 1
+  fi
   cr_digest=$(python3 -I scripts/tree-digest.py "$CLIENT_RUST") || exit 1
   h_digest=$(python3 -I scripts/tree-digest.py .) || exit 1
   h_base=$(git merge-base HEAD origin/main 2>/dev/null || echo "")
