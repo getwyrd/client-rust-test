@@ -20,8 +20,9 @@ schema = "parity-pins/v1"
 # check-pins.sh:
 #   - `rev` must be on the first-parent chain of the fork's `branch` — a state the
 #     branch has been at, never a stray fork commit or a merged-in PR branch's commit;
-#   - `upstream_base` must be exactly where `rev` meets upstream/master (their
-#     merge-base) — the fork never leaves upstream, and the base is never stale.
+#   - `upstream_base` must be exactly where `rev` meets upstream/master (the newest
+#     commit on master's first-parent chain that `rev` contains) — the fork never
+#     leaves upstream, and the base is never stale.
 # Every gap is still filed against tikv/client-rust. CI also runs the parity diff at
 # `upstream_base` (informational, never gating) so the upstream view stays visible.
 [client_rust]
