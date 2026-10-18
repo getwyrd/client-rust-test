@@ -117,8 +117,9 @@ fi
 #       branch itself has been at, not a stray fork commit, and not a commit of a PR
 #       branch that was later merged in (ancestry alone would accept those: a #557-only
 #       tree was never an integration state);
-#   3b. upstream_base is EXACTLY where rev meets <upstream>/master (their merge-base) —
-#       the branch was built on real upstream history, so every gap can still be stated
+#   3b. upstream_base is EXACTLY where rev meets <upstream>/master: the newest commit on
+#       master's first-parent chain that rev contains — the branch was built on real
+#       upstream history, so every gap can still be stated
 #       (and every fix filed) against tikv/client-rust, and CI's upstream view compares
 #       against the upstream commit the subject really sits on. Ancestry alone would
 #       let a stale upstream_base pass after integration merged a newer master.
@@ -185,9 +186,15 @@ if [ -d "$CLIENT_RUST/.git" ]; then
 
   master_ref="$upstream_remote/master"
   if [ -n "$upstream_remote" ] && fetched "$master_ref"; then
-    base=$(git -C "$CLIENT_RUST" merge-base "$RUST_REV" "$master_ref" 2>/dev/null || true)
+    # The newest commit on master's FIRST-PARENT chain that rev contains — not plain
+    # `merge-base`, whose best common ancestor can be a PR tip that upstream merged with a
+    # merge commit: a side-branch state master never was. Process substitution, not a
+    # pipe, so awk's early exit cannot trip pipefail.
+    base=$(awk 'NR == FNR { in_rev[$0]; next } ($0 in in_rev) { print; exit }' \
+      <(git -C "$CLIENT_RUST" rev-list "$RUST_REV" 2>/dev/null) \
+      <(git -C "$CLIENT_RUST" rev-list --first-parent "$master_ref" 2>/dev/null))
     if [ "$base" = "$RUST_BASE" ]; then
-      note "client_rust.upstream_base is where rev meets $master_ref — OK"
+      note "client_rust.upstream_base is where rev meets $master_ref (first-parent) — OK"
     elif [ -z "$base" ]; then
       bad "client_rust.rev $RUST_REV shares no history with $master_ref (or is not in the
        checkout). The fork's branch must be built on upstream history."
@@ -195,7 +202,7 @@ if [ -d "$CLIENT_RUST/.git" ]; then
       bad "client_rust.upstream_base is $RUST_BASE, but rev meets $master_ref at $base.
        Either $RUST_BRANCH merged a newer upstream master and upstream_base was not moved
        with it, or upstream_base is not on upstream history at all. Set upstream_base to
-       the merge-base, as a reviewed change."
+       $base, as a reviewed change."
     fi
   fi
 else

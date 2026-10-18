@@ -36,8 +36,10 @@ The subject is a commit of the fork's `integration` branch. `pins.toml [client_r
 1. `rev` is on the first-parent chain of `<fork>/integration`, so the pin is a state the
    branch has been at: never a stray fork commit, and never a commit of a PR branch
    that was merged in later (ancestry alone would accept one, e.g. a #557-only tree);
-2. `upstream_base` equals the merge-base of `rev` and upstream `master`, so the branch is
-   built on upstream history and the base is never stale.
+2. `upstream_base` is the newest commit on upstream `master`'s first-parent chain that
+   `rev` contains, so the branch is built on upstream history, the base is never stale,
+   and it is always a state `master` has been at (plain `merge-base` could return a
+   carried PR's tip, should upstream merge that PR with a merge commit).
 
 Under `PARITY_STRICT` (CI), any check that cannot run is a failure, as before.
 
