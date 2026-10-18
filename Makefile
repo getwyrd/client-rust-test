@@ -27,7 +27,7 @@ export PARITY_STRICT ?= 0
 
 .PHONY: default check go-check pins-check provenance unit-test gate-test verdict failpoint-test gate \
         drivers parity ledger cluster-up cluster-down cluster-logs cluster-up-3store \
-        cluster-down-3store broker-test clean
+        cluster-down-3store cluster-up-upstream cluster-down-upstream broker-test clean
 
 default: check
 
@@ -163,6 +163,16 @@ cluster-up-3store:
 
 cluster-down-3store:
 	$(BROKER) release manual-3store --missing-ok
+
+# ── The upstream profile ───────────────────────────────────────────────────────────
+# client-rust's own CI cluster (three stores, its config/tikv.toml + config/pd.toml), for
+# running client-rust's integration suites against a container. Slot 0 like the others;
+# set CLIENT_RUST_CONFIG to the checkout under test (default ../client-rust/config).
+cluster-up-upstream:
+	$(BROKER) lease upstream --slot 0 --ttl 0 --id manual-upstream --owner make
+
+cluster-down-upstream:
+	$(BROKER) release manual-upstream --missing-ok
 
 # The broker's own tests: Docker and the readiness poll are stubbed, so they run anywhere.
 broker-test:
