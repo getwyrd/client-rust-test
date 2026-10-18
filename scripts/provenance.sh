@@ -13,11 +13,21 @@
 # the repo: pointing the harness at a local branch to prove a fix). The fix is to
 # RECORD and ASSERT:
 #
-#   PARITY_STRICT=1  -> abort before a single test runs if we are off-pin.
-#   PARITY_STRICT=0  -> proceed, but stamp the truth and say so loudly.
+#   PARITY_MODE=strict     -> abort before a single test runs if we are off-pin.
+#                             (PARITY_STRICT=1 means the same.)
+#   PARITY_MODE=candidate  -> for testing a CHANGE (a loop bundle) against the pinned
+#                             world. client-rust and the harness may carry changes, but
+#                             client-rust must contain the pin, and the oracle, cluster
+#                             and Go toolchain must be on pin exactly as under strict.
+#                             Each changed tree is stamped with a content digest
+#                             (scripts/tree-digest.py), because no revision describes it.
+#   PARITY_MODE=advisory   -> proceed, but stamp the truth and say so loudly.
+#                             (The default; PARITY_STRICT=0 means the same.)
 #
 # Downstream, `ledger-check` refuses any result whose provenance says
-# strict:false. A ledger claim can only ever be settled by a pinned run.
+# strict:false. A ledger claim can only ever be settled by a pinned run. A candidate
+# result is judged only under `ledger-check` candidate mode, which reports a verdict
+# for one declared gap and never claims to settle the ledger.
 #
 # READ-ONLY with respect to ../client-rust.
 set -euo pipefail
@@ -25,9 +35,45 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 PINS="${PINS:-pins.toml}"
-CLIENT_RUST="${CLIENT_RUST:-../client-rust}"
 OUT="${1:-results/provenance.json}"
 STRICT="${PARITY_STRICT:-0}"
+
+case "${PARITY_MODE:-}" in
+  "") if [ "$STRICT" = "1" ]; then MODE=strict; else MODE=advisory; fi ;;
+  strict|candidate|advisory)
+    MODE="$PARITY_MODE"
+    if [ "$STRICT" = "1" ] && [ "$MODE" != strict ]; then
+      echo "provenance: PARITY_STRICT=1 contradicts PARITY_MODE=$MODE; set one of them" >&2
+      exit 1
+    fi ;;
+  *) echo "provenance: PARITY_MODE must be strict, candidate or advisory, not '$PARITY_MODE'" >&2
+     exit 1 ;;
+esac
+# Strict and candidate both refuse an off-pin oracle, cluster or toolchain. They differ
+# only in what they accept for the crate under test and the harness.
+if [ "$MODE" = advisory ]; then ENFORCE=0; else ENFORCE=1; fi
+[ "$MODE" = strict ] && STRICT=1
+
+# THE TREE CARGO BUILDS, NOT A TREE WE NAME. Cargo resolves the path dependency in
+# Cargo.toml and nothing else, so stamping any other directory would describe a tree that
+# never ran. $CLIENT_RUST used to be read here independently of the build: setting it to
+# another checkout produced a provenance for that checkout while cargo built ../client-rust.
+# So the path comes from Cargo.toml, and a $CLIENT_RUST that names another directory is a
+# refusal in every mode.
+BUILT=$(python3 -c "
+import tomllib,pathlib
+d=tomllib.loads(pathlib.Path('Cargo.toml').read_text())
+print(d['workspace']['dependencies']['tikv-client']['path'])")
+if [ -n "${CLIENT_RUST:-}" ] && \
+   [ "$(realpath -m "$CLIENT_RUST")" != "$(realpath -m "$BUILT")" ]; then
+  cat >&2 <<EOF
+REFUSING TO RUN: CLIENT_RUST=$CLIENT_RUST, but cargo builds the crate under test from
+$BUILT (Cargo.toml). The provenance would describe a tree that never ran. Unset
+CLIENT_RUST, or put the checkout you want to test at $BUILT.
+EOF
+  exit 1
+fi
+CLIENT_RUST="$BUILT"
 
 pin() { python3 -c "
 import tomllib,pathlib
@@ -39,7 +85,8 @@ print(cur)"; }
 
 PIN_REV=$(pin client_rust.rev)
 
-if [ -d "$CLIENT_RUST/.git" ]; then
+# -e, not -d: in a git worktree (every loop lane) .git is a file, not a directory.
+if [ -e "$CLIENT_RUST/.git" ]; then
   rev=$(git -C "$CLIENT_RUST" rev-parse HEAD)
   describe=$(git -C "$CLIENT_RUST" describe --tags --always --dirty 2>/dev/null || echo unknown)
   branch=$(git -C "$CLIENT_RUST" rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)
@@ -49,6 +96,27 @@ else
 fi
 
 if [ "$rev" = "$PIN_REV" ] && [ "$dirty" = false ]; then on_pin=true; else on_pin=false; fi
+
+# ── What a CANDIDATE run tested ──────────────────────────────────────────────
+# Only stamped in candidate mode: a digest reads every file of both trees.
+cand_json=""
+if [ "$MODE" = candidate ]; then
+  contains_pin=false
+  if [ "$rev" != unknown ] && git -C "$CLIENT_RUST" merge-base --is-ancestor "$PIN_REV" HEAD 2>/dev/null; then
+    contains_pin=true
+  fi
+  cr_digest=$(python3 -I scripts/tree-digest.py "$CLIENT_RUST") || exit 1
+  h_digest=$(python3 -I scripts/tree-digest.py .) || exit 1
+  h_base=$(git merge-base HEAD origin/main 2>/dev/null || echo "")
+  cand_json=$(cat <<EOF
+,
+  "candidate": {
+    "client_rust": { "contains_pin": $contains_pin, "digest": "$cr_digest" },
+    "harness": { "base": "$h_base", "digest": "$h_digest" }
+  }
+EOF
+)
+fi
 
 # ── The ORACLE's provenance ──────────────────────────────────────────────────
 # Ask GO what it RESOLVED, do not re-read what we asked for. Stamping client_go
@@ -169,6 +237,7 @@ cat > "$OUT" <<EOF
   "schema": "parity-provenance/v1",
   "captured_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "strict": $( [ "$STRICT" = "1" ] && echo true || echo false ),
+  "mode": "$MODE",
   "client_rust": {
     "path": "$CLIENT_RUST",
     "rev": "$rev",
@@ -202,7 +271,7 @@ cat > "$OUT" <<EOF
     "pinned_go": "$GO_TC_PIN",
     "go_matches_pin": $go_tc_on_pin
   },
-  "harness": { "rev": "$(git rev-parse HEAD)", "dirty": $( [ -n "$(git status --porcelain)" ] && echo true || echo false ) }
+  "harness": { "rev": "$(git rev-parse HEAD)", "dirty": $( [ -n "$(git status --porcelain)" ] && echo true || echo false ) }$cand_json
 }
 EOF
 
@@ -226,7 +295,7 @@ echo "  go:          $go_toolchain (pin $GO_TC_PIN)"
 # The Go toolchain gate. A `go` directive is a minimum, so the compiler that actually
 # ran is not implied by go.mod and has to be checked separately.
 if [ "$go_tc_on_pin" = false ]; then
-  if [ "$STRICT" = "1" ]; then
+  if [ "$ENFORCE" = 1 ]; then
     cat >&2 <<EOF
 
 REFUSING TO RUN: the Go toolchain is $go_toolchain, but the pin names $GO_TC_PIN.
@@ -244,7 +313,7 @@ EOF
 fi
 
 # ── The cluster gate ─────────────────────────────────────────────────────────
-# Under PARITY_STRICT, a cluster we could not identify is a REFUSAL, not a shrug.
+# Under strict or candidate mode, a cluster we could not identify is a REFUSAL, not a shrug.
 # check-pins.sh already states the principle: "an unverifiable invariant is not a
 # satisfied one." A behavioural claim is a claim about a client talking to a
 # specific TiKV; against an unknown server it certifies nothing.
@@ -254,7 +323,7 @@ if [ "$cluster_on_pin" = false ]; then
   else
     why="the cluster is PD $pd_version / TiKV [$tikv_versions], but the pin names $TIKV_VER_PIN"
   fi
-  if [ "$STRICT" = "1" ]; then
+  if [ "$ENFORCE" = 1 ]; then
     cat >&2 <<EOF
 
 REFUSING TO RUN: $why.
@@ -286,7 +355,7 @@ if [ "$go_on_pin" = false ]; then
   else
     why="client-go resolved to $go_resolved, but the pin names $GO_VER_PIN"
   fi
-  if [ "$STRICT" = "1" ]; then
+  if [ "$ENFORCE" = 1 ]; then
     cat >&2 <<EOF
 
 REFUSING TO RUN: $why.
@@ -299,6 +368,33 @@ EOF
     exit 1
   fi
   echo "  client-go:   OFF PIN — $why (advisory; CI refuses this)" >&2
+fi
+
+if [ "$MODE" = candidate ]; then
+  if [ "$contains_pin" != true ]; then
+    cat >&2 <<EOF
+
+REFUSING TO RUN: candidate mode tests a change ON TOP OF the pinned client-rust, but
+$CLIENT_RUST at $rev ($branch) does not contain the pin $PIN_REV.
+
+A verdict for this tree would mix the change with everything else between the two
+revisions. Rebase the change onto the pin (or onto integration, which contains it).
+EOF
+    exit 1
+  fi
+  cat >&2 <<EOF
+
+  ┌─ CANDIDATE RUN ──────────────────────────────────────────────────────────┐
+    Testing a change against the pinned world.
+      client-rust: $rev ($branch)$( [ "$dirty" = true ] && echo ", DIRTY" ), contains pin $PIN_REV
+                   digest $cr_digest
+      harness:     $(git rev-parse HEAD)$( [ -n "$(git status --porcelain)" ] && echo ", DIRTY" )
+                   digest $h_digest
+    NOT evidence: \`ledger-check\` judges it only in candidate mode, for one declared
+    gap, and never settles the ledger with it.
+  └──────────────────────────────────────────────────────────────────────────┘
+EOF
+  exit 0
 fi
 
 if [ "$on_pin" = true ]; then

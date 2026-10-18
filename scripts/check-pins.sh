@@ -97,7 +97,8 @@ fi
 # is what client-go does here"). Reading a DIFFERENT client-go than the one the
 # ledger names makes that half a guess. Nothing checked this before; the sibling
 # happened to be on-pin by luck, which is not a property you can rely on twice.
-if [ -d "$CLIENT_GO/.git" ]; then
+# -e, not -d: in a git worktree .git is a file, not a directory.
+if [ -e "$CLIENT_GO/.git" ]; then
   have=$(git -C "$CLIENT_GO" rev-parse HEAD)
   if [ "$have" = "$GO_REV" ]; then
     note "client-go sibling is at the pinned rev — OK"
@@ -164,7 +165,8 @@ fetched() {
   return 1
 }
 
-if [ -d "$CLIENT_RUST/.git" ]; then
+# -e, not -d: in a git worktree (every loop lane) .git is a file, not a directory.
+if [ -e "$CLIENT_RUST/.git" ]; then
   fork_remote=$(remote_for "$RUST_FORK")
   upstream_remote=$(remote_for "$RUST_UPSTREAM")
   [ -n "$fork_remote" ] || cannot_verify "no remote points at $RUST_FORK"

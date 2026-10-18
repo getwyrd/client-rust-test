@@ -1,0 +1,74 @@
+{
+  "divergences": [
+    {
+      "oracle": "ok",
+      "path": "class",
+      "step": "checker-checksum",
+      "subject": "unsupported"
+    },
+    {
+      "oracle": "<step absent>",
+      "path": "unsupported.detail",
+      "step": "checker-checksum",
+      "subject": "client-rust has no raw checksum: tikv-client implements no RawChecksum request. client-go's rawkv.Checksum returns crc64_xor/total_kvs/total_bytes computed server-side. The driver does NOT emulate it: the gap is the finding (G-0002)."
+    }
+  ],
+  "gap": "G-0002",
+  "oracle": "oracle",
+  "provenance": {
+    "candidate": {
+      "client_rust": {
+        "contains_pin": true,
+        "digest": "69a4fea51aa627017d68b335fedae6c7268e5c2a078c143f24d11210752923af"
+      },
+      "harness": {
+        "base": "d934ec8f23814063d581af82b6d59ad105dbe187",
+        "digest": "a1756837b3ab4285ca15490663e61622ffebb26da8a19b11bb8d0f254ea60596"
+      }
+    },
+    "captured_at": "2026-10-18T23:43:35Z",
+    "client_go": {
+      "matches_pin": true,
+      "module": "github.com/tikv/client-go/v2",
+      "pinned_version": "v2.0.8-0.20261014135228-56e5933f0069",
+      "replaced": false,
+      "verified": true,
+      "version": "v2.0.8-0.20261014135228-56e5933f0069"
+    },
+    "client_rust": {
+      "branch": "HEAD",
+      "describe": "0.4.0-38-gb10bc69-dirty",
+      "dirty": true,
+      "matches_pin": false,
+      "path": "../client-rust",
+      "pinned_rev": "b10bc696225af8cec3cf8b6422c64bb3fe21f4b7",
+      "rev": "b10bc696225af8cec3cf8b6422c64bb3fe21f4b7"
+    },
+    "cluster": {
+      "matches_pin": true,
+      "observed_pd_version": "v8.5.5",
+      "observed_tikv_versions": "8.5.5",
+      "pd_addr": "127.0.0.1:32000",
+      "pinned_pd_image": "pingcap/pd:v8.5.5@sha256:a043b91dc9a0ad8d1c2a2aa8b84ea3f28c2399f9245683cc83d1603b5ee1df9c",
+      "pinned_tikv_image": "pingcap/tikv:v8.5.5@sha256:1600c2de7432af1f7f23291dcac13b3f82950d4ef722b1f01c3e7b129af64b64",
+      "pinned_version": "v8.5.5",
+      "verified": true
+    },
+    "harness": {
+      "dirty": true,
+      "rev": "d934ec8f23814063d581af82b6d59ad105dbe187"
+    },
+    "mode": "candidate",
+    "schema": "parity-provenance/v1",
+    "strict": false,
+    "toolchain": {
+      "go": "1.25.14",
+      "go_matches_pin": true,
+      "pinned_go": "1.25.14",
+      "rust": "rustc 1.93.0 (254b59607 2026-01-19)"
+    }
+  },
+  "scenario": "raw-checksum",
+  "schema": "parity-divergence/v1",
+  "subject": "subject"
+}

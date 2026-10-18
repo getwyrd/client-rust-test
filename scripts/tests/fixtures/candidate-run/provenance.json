@@ -1,0 +1,44 @@
+{
+  "schema": "parity-provenance/v1",
+  "captured_at": "2026-10-18T23:43:35Z",
+  "strict": false,
+  "mode": "candidate",
+  "client_rust": {
+    "path": "../client-rust",
+    "rev": "b10bc696225af8cec3cf8b6422c64bb3fe21f4b7",
+    "branch": "HEAD",
+    "describe": "0.4.0-38-gb10bc69-dirty",
+    "dirty": true,
+    "pinned_rev": "b10bc696225af8cec3cf8b6422c64bb3fe21f4b7",
+    "matches_pin": false
+  },
+  "client_go": {
+    "module": "github.com/tikv/client-go/v2",
+    "version": "v2.0.8-0.20261014135228-56e5933f0069",
+    "pinned_version": "v2.0.8-0.20261014135228-56e5933f0069",
+    "replaced": false,
+    "verified": true,
+    "matches_pin": true
+  },
+  "cluster": {
+    "pd_addr": "127.0.0.1:32000",
+    "pinned_version": "v8.5.5",
+    "pinned_pd_image": "pingcap/pd:v8.5.5@sha256:a043b91dc9a0ad8d1c2a2aa8b84ea3f28c2399f9245683cc83d1603b5ee1df9c",
+    "pinned_tikv_image": "pingcap/tikv:v8.5.5@sha256:1600c2de7432af1f7f23291dcac13b3f82950d4ef722b1f01c3e7b129af64b64",
+    "observed_pd_version": "v8.5.5",
+    "observed_tikv_versions": "8.5.5",
+    "verified": true,
+    "matches_pin": true
+  },
+  "toolchain": {
+    "rust": "rustc 1.93.0 (254b59607 2026-01-19)",
+    "go": "1.25.14",
+    "pinned_go": "1.25.14",
+    "go_matches_pin": true
+  },
+  "harness": { "rev": "d934ec8f23814063d581af82b6d59ad105dbe187", "dirty": true },
+  "candidate": {
+    "client_rust": { "contains_pin": true, "digest": "69a4fea51aa627017d68b335fedae6c7268e5c2a078c143f24d11210752923af" },
+    "harness": { "base": "d934ec8f23814063d581af82b6d59ad105dbe187", "digest": "a1756837b3ab4285ca15490663e61622ffebb26da8a19b11bb8d0f254ea60596" }
+  }
+}
