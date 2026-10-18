@@ -11,9 +11,9 @@ executable bits. A `git diff` hash would miss new files.
 
 Only .gitignore files decide what is left out, never .git/info/exclude or a user's
 core.excludesFile: those live outside the tree, so a file hidden by them could change
-what cargo builds without changing the digest. A symlink is digested by its link text,
-which is only enough if it stays inside the tree (its target is then digested on its own);
-one that leads out of the tree is refused.
+what cargo builds without changing the digest. A symlink is refused: its target may be
+ignored, a directory, or outside the tree, so its link text says nothing about what cargo
+reads through it. Neither repository tracks one.
 
 READ-ONLY: it writes nothing into the repository, not even objects (unlike `git add` into
 a scratch index, which would write blobs into ../client-rust's object store).
@@ -26,7 +26,6 @@ import subprocess
 import sys
 
 root = sys.argv[1]
-real_root = os.path.realpath(os.fsencode(root))
 out = subprocess.run(
     ["git", "-C", root, "ls-files", "-z", "--cached", "--others",
      "--exclude-per-directory=.gitignore"],
@@ -38,12 +37,9 @@ for rel in sorted({f for f in out.split(b"\0") if f}):
     if st is None:
         continue  # a tracked file deleted on disk: its absence changes the digest
     if stat.S_ISLNK(st.st_mode):
-        target = os.path.realpath(p)
-        if os.path.commonpath([real_root, target]) != real_root:
-            sys.exit(f"tree-digest: {rel.decode(errors='replace')} is a symlink out of the "
-                     f"tree (to {os.fsdecode(target)}), so what it points to is not digested")
-        kind, data = b"l", os.readlink(p)
-    elif stat.S_ISREG(st.st_mode):
+        sys.exit(f"tree-digest: {rel.decode(errors='replace')} is a symlink, so what cargo "
+                 "reads through it is not digested")
+    if stat.S_ISREG(st.st_mode):
         kind = b"x" if st.st_mode & 0o111 else b"f"
         with open(p, "rb") as f:
             data = f.read()

@@ -95,6 +95,11 @@ another gap's claim or scenario could break that gap and re-state it in the same
 so it must change only the declared gap ({gap}). Re-state other gaps in their own change.
 """)
 
+# The pinned world is the base's: a candidate cannot move it. (A pin move is its own
+# change, settled in strict mode once merged.)
+if at_base("pins.toml") != pathlib.Path("pins.toml").read_bytes():
+    refuse("the change edits pins.toml; a candidate is judged against the base's pins")
+
 raw = at_base(ledger_path)
 if raw is None:
     refuse(f"{ledger_path} does not exist on the base")
@@ -171,6 +176,20 @@ pinned world with PARITY_STRICT=1, or iterate locally without settling the ledge
 # admissibility rule would have been technically right and practically useless.
 #
 # A ledger entry names its scenario; the scenario names its artifact. Judge those.
+#
+# ONE NAME, ONE SCENARIO. The runner runs every scenarios/*.json and names each artifact
+# after the scenario's JSON `name`, not its file. Two files with one name would write the
+# same artifact, the later one winning, so a gap could be judged by another scenario's
+# result while its own scenario file is untouched.
+names = {}
+for sp in sorted(pathlib.Path("scenarios").glob("*.json")):
+    n = json.loads(sp.read_text()).get("name")
+    if not n:
+        refuse(f"{sp} has no `name`, so the runner cannot name its result")
+    if n in names:
+        refuse(f"{names[n]} and {sp} share the scenario name {n!r}, so one overwrites the "
+               "other's result and a gap could be judged by the wrong scenario")
+    names[n] = sp
 results = []
 for gap in ledger.get("gap", []):
     name = json.loads(pathlib.Path(gap["scenario"]).read_text())["name"]
@@ -293,6 +312,10 @@ for f in results:
         if cc.get("contains_pin") is not True:
             refuse(f"{f}: the client-rust tree does not contain the pin, so its verdict mixes "
                    "the change with everything between the two revisions")
+        if p.get("toolchain", {}).get("rust_matches_pin") is not True:
+            refuse(f"{f}: built with {p.get('toolchain', {}).get('rust')}, not the pinned "
+                   "Rust toolchain. A candidate may edit rust-toolchain.toml, so the "
+                   "compiler that ran is checked, not assumed.")
         if cc.get("digest") != cur_client_rust:
             refuse(f"{f}: produced against a client-rust tree with digest {cc.get('digest')}, "
                    f"but the tree cargo builds now has digest {cur_client_rust}")
