@@ -28,7 +28,10 @@
 #
 # Judges a CHANGE (a loop bundle) instead of settling the ledger. It accepts only results
 # stamped by `PARITY_MODE=candidate scripts/provenance.sh`, and only if both trees still
-# have the contents that were stamped. Every gap except <id> must hold exactly as declared;
+# have the contents that were stamped. Every gap except <id> is judged by its claim as it
+# stands on the harness's BASE (its merge-base with origin/main), and the change may not
+# edit those claims or their scenarios: otherwise a change could break a gap and delete
+# its entry in the same stroke. Every gap except <id> must hold exactly as declared;
 # <id>'s outcome is reported, not judged, in results/candidate-verdict.json, because what
 # counts as success depends on the change: a fix wants XCONVERGE, a new gap wants
 # XDIVERGE. A candidate run never prints the "every claim holds" line: it is not evidence.
@@ -65,6 +68,51 @@ import tomllib,pathlib
 print(tomllib.loads(pathlib.Path('Cargo.toml').read_text())['workspace']['dependencies']['tikv-client']['path'])")
   cur_harness=$(python3 -I scripts/tree-digest.py .) || exit 2
   cur_client_rust=$(python3 -I scripts/tree-digest.py "$built") || exit 2
+  base=$(git merge-base HEAD origin/main 2>/dev/null) || base=""
+  if [ -z "$base" ]; then
+    echo "ledger-check: candidate mode judges the other gaps by the harness's base, but HEAD has no merge-base with origin/main (fetch origin)" >&2
+    exit 2
+  fi
+  # ── 1a. THE CHANGE MAY NOT REWRITE THE CLAIMS IT IS JUDGED BY ─────────────────────
+  # The ledger and the scenarios are part of the harness tree the change may modify. So
+  # every gap except the declared one must be on the base exactly as it is here, with an
+  # unchanged scenario, and the change may add no gap but the declared one.
+  python3 - "$LEDGER" "$GAP" "$base" <<'PY' || exit 2
+import pathlib, subprocess, sys, tomllib
+
+ledger_path, gap, base = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def at_base(path):
+    r = subprocess.run(["git", "show", f"{base}:{path}"], capture_output=True)
+    return r.stdout if r.returncode == 0 else None
+
+def refuse(why):
+    sys.exit(f"""
+REFUSING TO JUDGE THE CANDIDATE: {why}
+
+A candidate is judged against the claims on its base ({base[:12]}). A change that edits
+another gap's claim or scenario could break that gap and re-state it in the same stroke,
+so it must change only the declared gap ({gap}). Re-state other gaps in their own change.
+""")
+
+raw = at_base(ledger_path)
+if raw is None:
+    refuse(f"{ledger_path} does not exist on the base")
+then = {g["id"]: g for g in tomllib.loads(raw.decode()).get("gap", [])}
+now = {g["id"]: g for g in tomllib.loads(pathlib.Path(ledger_path).read_text()).get("gap", [])}
+for gid in sorted(set(then) | set(now)):
+    if gid == gap:
+        continue
+    if gid not in now:
+        refuse(f"the change removes {gid} from {ledger_path}")
+    if gid not in then:
+        refuse(f"the change adds {gid}, which is not the declared gap")
+    if now[gid] != then[gid]:
+        refuse(f"the change edits the entry for {gid}")
+    scen = now[gid]["scenario"]
+    if at_base(scen) != pathlib.Path(scen).read_bytes():
+        refuse(f"the change edits {scen}, the scenario of {gid}")
+PY
 fi
 
 # ── 1. ADMISSIBILITY ─────────────────────────────────────────────────────────────────
@@ -84,13 +132,13 @@ fi
 # So the runner stamps each artifact with the provenance it ran under, and this reads
 # THAT. Evidence carries the conditions it was gathered under, or it is not evidence.
 HARNESS_REV="$(git rev-parse HEAD)"
-python3 - "$PINS" "$HARNESS_REV" "$LEDGER" "$MODE" "$cur_harness" "$cur_client_rust" <<'PY' || exit 2
+python3 - "$PINS" "$HARNESS_REV" "$LEDGER" "$MODE" "$cur_harness" "$cur_client_rust" "${base:-}" <<'PY' || exit 2
 import json, pathlib, sys, tomllib
 
 pins = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
 harness_rev = sys.argv[2]
 ledger = tomllib.loads(pathlib.Path(sys.argv[3]).read_text())
-mode, cur_harness, cur_client_rust = sys.argv[4], sys.argv[5], sys.argv[6]
+mode, cur_harness, cur_client_rust, base = sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7]
 
 def refuse(why):
     if mode == "candidate":
@@ -232,6 +280,9 @@ for f in results:
                    "Re-run with PARITY_MODE=candidate.")
         c = p.get("candidate") or {}
         ch, cc = c.get("harness", {}), c.get("client_rust", {})
+        if ch.get("base") != base:
+            refuse(f"{f}: produced on harness base {ch.get('base')!r}, but the base is now "
+                   f"{base}, so the claims it was judged against have moved")
         if ch.get("digest") != cur_harness:
             refuse(f"{f}: produced by a harness with digest {ch.get('digest')}, but the harness "
                    f"here now has digest {cur_harness}. The harness is the instrument; re-run "
@@ -265,15 +316,17 @@ PY
 # which client-go binary actually ran, and the skip would have looked like a pass. An
 # absent check must never read as a satisfied one, so every adjudicated scenario must
 # produce the traces its ledger entry depends on, and each must carry a Go binding.
-python3 - "$PINS" "$LEDGER" <<'PY' || exit 2
+python3 - "$PINS" "$LEDGER" "$MODE" <<'PY' || exit 2
 import json, pathlib, sys, tomllib
 
 pins = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
 ledger = tomllib.loads(pathlib.Path(sys.argv[2]).read_text())
+mode = sys.argv[3]
 want = pins["client_go"]["version"]
 
 def refuse(why):
-    sys.exit(f"REFUSING TO SETTLE THE LEDGER: {why}")
+    what = "JUDGE THE CANDIDATE" if mode == "candidate" else "SETTLE THE LEDGER"
+    sys.exit(f"REFUSING TO {what}: {why}")
 
 for gap in ledger.get("gap", []):
     scen_path = pathlib.Path(gap["scenario"])
@@ -302,12 +355,26 @@ for gap in ledger.get("gap", []):
 PY
 
 # ── 3. THE VERDICT ───────────────────────────────────────────────────────────────────
-python3 - "$LEDGER" "$MODE" "$GAP" <<'PY'
-import json, pathlib, sys, tomllib
+python3 - "$LEDGER" "$MODE" "$GAP" "${base:-}" <<'PY'
+import json, pathlib, subprocess, sys, tomllib
 
 ledger = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
-mode, declared_gap = sys.argv[2], sys.argv[3]
+mode, declared_gap, base = sys.argv[2], sys.argv[3], sys.argv[4]
 outcome = {}
+
+if mode == "candidate":
+    def git(*a):
+        return subprocess.run(["git", *a], capture_output=True, text=True)
+    then = git("show", f"{base}:{sys.argv[1]}")
+    then_gaps = {g["id"]: g for g in tomllib.loads(then.stdout).get("gap", [])} if then.returncode == 0 else {}
+    now_entry = next(g for g in ledger["gap"] if g["id"] == declared_gap)
+    declared_entry = ("new" if declared_gap not in then_gaps
+                      else "unchanged" if then_gaps[declared_gap] == now_entry else "changed")
+    # Tracked changes against the base, plus untracked files .gitignore does not exclude
+    # (the same set scripts/tree-digest.py digests).
+    harness_changed = sorted(set(
+        git("diff", "--name-only", base).stdout.split("\n")
+        + git("ls-files", "--others", "--exclude-per-directory=.gitignore").stdout.split("\n")) - {""})
 
 for gap in ledger.get("gap", []):
     gid, scen = gap["id"], gap["scenario"]
@@ -410,14 +477,22 @@ if mode == "candidate":
     others_broken = sorted(g for g in others if g in broken)
     # Written before the exit, pass or fail: the caller decides what the declared gap's
     # outcome means for its change, and needs it even when another gap broke.
+    # The provenance is the one section 1 checked: the declared gap's own artifact, not
+    # results/provenance.json, which a later provenance.sh run may have rewritten.
+    scen_name = json.loads(pathlib.Path(
+        next(g for g in ledger["gap"] if g["id"] == declared_gap)["scenario"]).read_text())["name"]
+    checked = json.loads(pathlib.Path(f"results/divergence.{scen_name}.json").read_text())
     pathlib.Path("results/candidate-verdict.json").write_text(json.dumps({
         "schema": "parity-candidate-verdict/v1",
         "gap": declared_gap,
         "outcome": outcome[declared_gap],
         "others_hold": not others_broken,
         "others": others,
-        "provenance": json.loads(pathlib.Path("results/provenance.json").read_text())
-                      .get("candidate"),
+        # What the change did to the instrument, for the caller to judge: a fix to
+        # client-rust should touch no harness file at all.
+        "declared_entry": declared_entry,
+        "harness_changed_files": harness_changed,
+        "provenance": checked["provenance"].get("candidate"),
     }, indent=2) + "\n")
     print(f"CANDIDATE — not evidence. {declared_gap}: {outcome[declared_gap]}.")
     if outcome[declared_gap] == "MISSING":
