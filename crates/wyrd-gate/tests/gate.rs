@@ -83,12 +83,15 @@ async fn p0_cluster_can_split_regions() {
     assert!(!up.is_empty(), "PD reports no TiKV store Up");
 
     // Comfortably past region-max-keys = 10, in one batch.
-    let mut batch = WriteBatch::new();
-    for i in 0..200 {
-        batch = batch.put(key(prefix, &format!("k/{i:04}")), val("v"));
-    }
+    let seed = || {
+        let mut batch = WriteBatch::new();
+        for i in 0..200 {
+            batch = batch.put(key(prefix, &format!("k/{i:04}")), val("v"));
+        }
+        batch
+    };
     assert_eq!(
-        store.commit(batch).await.expect("seed"),
+        store.commit(seed()).await.expect("seed"),
         CommitOutcome::Committed
     );
 
@@ -98,7 +101,18 @@ async fn p0_cluster_can_split_regions() {
     // `cluster/tikv.toml` is in force — an explicit split would succeed even with
     // the config missing, and every other test's cross-region claim rests on
     // natural splitting actually happening.
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    //
+    // Re-write the same keys every 10 s while waiting (#61). Another test's explicit
+    // split, just below this range, can create the region that holds our keys just as
+    // the batch above is written. That region then reported zero keys to PD and did
+    // not split for over a minute; TiKV appears not to re-check it until a new write
+    // reaches it. Re-writing is still a plain write: the split it leads to is TiKV's
+    // own, so this proves as much about cluster/tikv.toml as the first write does.
+    let wait = Duration::from_secs(90);
+    let rewrite_every = Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + wait;
+    let mut next_rewrite = std::time::Instant::now() + rewrite_every;
+    let mut rewrites = 0;
     let lo = key(prefix, "k/0000");
     let hi = key(prefix, "k/0199");
     loop {
@@ -107,18 +121,43 @@ async fn p0_cluster_can_split_regions() {
         if harness::cluster::are_cross_region(&lo, &hi).await {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "PRECONDITION FAILED: 200 keys did not split across regions (cluster has {} regions, \
-             was {before}). The gate's multi-region obligations are VOID without splits — check \
-             that cluster/tikv.toml is mounted (region-max-keys = 10).",
-            harness::cluster::region_count().await
-        );
+        if std::time::Instant::now() >= deadline {
+            let now = harness::cluster::region_count().await;
+            // A growing count does not prove cluster/tikv.toml is in force: other tests
+            // ask PD for explicit splits. It only tells the two likely causes apart.
+            let cause = if now > before {
+                format!(
+                    "the cluster has {now} regions (was {before}), so regions are being \
+                     created, but this range has not split yet. Most likely the split checker \
+                     has not checked it even after the re-writes; if this repeats, check that cluster/tikv.toml \
+                     is mounted (region-max-keys = 10)"
+                )
+            } else {
+                format!(
+                    "no region has split at all ({now} regions, was {before}): check that \
+                     cluster/tikv.toml is mounted (region-max-keys = 10)"
+                )
+            };
+            panic!(
+                "PRECONDITION FAILED: 200 keys did not split across regions within {}s \
+                 ({rewrites} re-writes): {cause}. The gate's multi-region obligations are \
+                 VOID without splits.",
+                wait.as_secs()
+            );
+        }
+        if std::time::Instant::now() >= next_rewrite {
+            assert_eq!(
+                store.commit(seed()).await.expect("re-write"),
+                CommitOutcome::Committed
+            );
+            rewrites += 1;
+            next_rewrite = std::time::Instant::now() + rewrite_every;
+        }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
     println!(
-        "cluster splits regions: {} -> {} regions, stores Up {up:?}",
+        "cluster splits regions: {} -> {} regions ({rewrites} re-writes), stores Up {up:?}",
         before,
         harness::cluster::region_count().await
     );
