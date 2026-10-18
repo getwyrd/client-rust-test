@@ -25,6 +25,10 @@ GO ?= go
 # still works — that is the whole reason the dependency is a path dep.
 export PARITY_STRICT ?= 0
 
+# PARITY_MODE=candidate tests a CHANGE against the pinned world (scripts/provenance.sh):
+# `PARITY_MODE=candidate PARITY_GAP=<id> make ledger` reports <id>'s outcome in
+# results/candidate-verdict.json and fails if any other claim breaks. It is never evidence.
+
 .PHONY: default check go-check pins-check provenance unit-test gate-test verdict failpoint-test gate \
         drivers parity ledger cluster-up cluster-down cluster-logs cluster-up-3store \
         cluster-down-3store cluster-up-upstream cluster-down-upstream broker-test clean
@@ -178,7 +182,8 @@ cluster-up-upstream:
 cluster-down-upstream:
 	$(BROKER) release manual-upstream --missing-ok
 
-# The broker's own tests: Docker and the readiness poll are stubbed, so they run anywhere.
+# The script tests: the broker (Docker and the readiness poll stubbed) and candidate
+# mode (over recorded results). No cluster, so they run anywhere.
 broker-test:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
 

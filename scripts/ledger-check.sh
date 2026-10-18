@@ -22,6 +22,16 @@
 # still open — the run could differ for an unrelated reason, or because the harness
 # broke. Accepting any difference as proof would let a broken harness masquerade as a
 # confirmed finding, which is the same false-green this whole mechanism exists to prevent.
+#
+# ── CANDIDATE MODE ───────────────────────────────────────────────────────────────────
+#   PARITY_MODE=candidate PARITY_GAP=<id> scripts/ledger-check.sh
+#
+# Judges a CHANGE (a loop bundle) instead of settling the ledger. It accepts only results
+# stamped by `PARITY_MODE=candidate scripts/provenance.sh`, and only if both trees still
+# have the contents that were stamped. Every gap except <id> must hold exactly as declared;
+# <id>'s outcome is reported, not judged, in results/candidate-verdict.json, because what
+# counts as success depends on the change: a fix wants XCONVERGE, a new gap wants
+# XDIVERGE. A candidate run never prints the "every claim holds" line: it is not evidence.
 set -uo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -29,6 +39,33 @@ cd "$(git rev-parse --show-toplevel)"
 LEDGER="${LEDGER:-ledger.toml}"
 PINS="${PINS:-pins.toml}"
 rc=0
+
+MODE="${PARITY_MODE:-strict}"
+GAP="${PARITY_GAP:-}"
+case "$MODE" in
+  strict|candidate) ;;
+  *) echo "ledger-check: PARITY_MODE must be strict or candidate, not '$MODE' (an advisory run settles nothing)" >&2
+     exit 2 ;;
+esac
+cur_harness=""; cur_client_rust=""
+if [ "$MODE" = candidate ]; then
+  # Never leave a previous run's verdict behind for a caller to read after a refusal.
+  rm -f results/candidate-verdict.json
+  if ! python3 -c "
+import sys,tomllib,pathlib
+ids=[g['id'] for g in tomllib.loads(pathlib.Path('$LEDGER').read_text()).get('gap',[])]
+sys.exit(0 if sys.argv[1] in ids else 1)" "$GAP"; then
+    echo "ledger-check: candidate mode needs PARITY_GAP set to a gap declared in $LEDGER (got '$GAP')" >&2
+    exit 2
+  fi
+  # The trees as they are NOW. Each result must carry these same digests, or it was
+  # produced from different contents than the ones being judged.
+  built=$(python3 -c "
+import tomllib,pathlib
+print(tomllib.loads(pathlib.Path('Cargo.toml').read_text())['workspace']['dependencies']['tikv-client']['path'])")
+  cur_harness=$(python3 -I scripts/tree-digest.py .) || exit 2
+  cur_client_rust=$(python3 -I scripts/tree-digest.py "$built") || exit 2
+fi
 
 # ── 1. ADMISSIBILITY ─────────────────────────────────────────────────────────────────
 # Checked BEFORE any verdict. A claim settled off-pin is not settled.
@@ -47,14 +84,23 @@ rc=0
 # So the runner stamps each artifact with the provenance it ran under, and this reads
 # THAT. Evidence carries the conditions it was gathered under, or it is not evidence.
 HARNESS_REV="$(git rev-parse HEAD)"
-python3 - "$PINS" "$HARNESS_REV" "$LEDGER" <<'PY' || exit 2
+python3 - "$PINS" "$HARNESS_REV" "$LEDGER" "$MODE" "$cur_harness" "$cur_client_rust" <<'PY' || exit 2
 import json, pathlib, sys, tomllib
 
 pins = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
 harness_rev = sys.argv[2]
 ledger = tomllib.loads(pathlib.Path(sys.argv[3]).read_text())
+mode, cur_harness, cur_client_rust = sys.argv[4], sys.argv[5], sys.argv[6]
 
 def refuse(why):
+    if mode == "candidate":
+        sys.exit(f"""
+REFUSING TO JUDGE THE CANDIDATE: {why}
+
+A candidate verdict is only meaningful for the exact trees that produced the results,
+run against the pinned oracle, cluster and toolchain. Re-run
+`PARITY_MODE=candidate make parity` with the trees as they are now.
+""")
     sys.stderr.write(f"""
 REFUSING TO SETTLE THE LEDGER: {why}
 
@@ -85,23 +131,7 @@ for gap in ledger.get("gap", []):
 if not results:
     refuse("the ledger declares no gaps — there is nothing to settle")
 
-for f in results:
-    p_ = pathlib.Path(f)
-    if not p_.exists():
-        refuse(f"{f} is missing — the ledger names this scenario but it has not been run. "
-               "Run `make parity`.")
-    r = json.loads(p_.read_text())
-    p = r.get("provenance")
-    if not p:
-        refuse(f"{f} carries no provenance, so the world it was produced in is unknown. "
-               "Re-run `make parity` — a result that cannot say what it was gathered "
-               "against is not evidence.")
-
-    if p.get("schema") != "parity-provenance/v1":
-        refuse(f"{f}: unrecognized provenance schema")
-    if p.get("strict") is not True:
-        refuse(f"{f}: produced with strict:false — not admissible as evidence")
-
+def strict_subject_and_harness(f, p):
     # ── THE HARNESS IS THE INSTRUMENT ────────────────────────────────────────────
     # A modified runner, driver, projection, scenario or ledger can change the observed
     # divergence — or manufacture the declared one outright — while every client stays
@@ -145,6 +175,8 @@ for f in results:
                f"names {pins['client_rust']['rev']} — the pin moved after this result "
                "was gathered, so it no longer describes the pinned world")
 
+
+def oracle_cluster_toolchain(f, p):
     cg = p["client_go"]
     if cg.get("replaced") is True:
         refuse(f"{f}: the oracle was REPLACED — a local tree you can edit, not the pinned module")
@@ -171,6 +203,54 @@ for f in results:
         refuse(f"{f}: the cluster was PD {cl.get('observed_pd_version')} / "
                f"TiKV [{cl.get('observed_tikv_versions')}], but the pin names "
                f"{cl.get('pinned_version')}")
+
+for f in results:
+    p_ = pathlib.Path(f)
+    if not p_.exists():
+        refuse(f"{f} is missing — the ledger names this scenario but it has not been run. "
+               "Run `make parity`.")
+    r = json.loads(p_.read_text())
+    p = r.get("provenance")
+    if not p:
+        refuse(f"{f} carries no provenance, so the world it was produced in is unknown. "
+               "Re-run `make parity` — a result that cannot say what it was gathered "
+               "against is not evidence.")
+
+    if p.get("schema") != "parity-provenance/v1":
+        refuse(f"{f}: unrecognized provenance schema")
+
+    if mode == "candidate":
+        # ── A CANDIDATE: a change judged against the pinned world ────────────────────
+        # The subject and the harness may differ from the pin; what they contain is
+        # fixed by digest instead of by revision. A digest that no longer matches the
+        # tree on disk means the evidence came from other contents (results/ is
+        # gitignored and survives edits), so it describes nothing that is here now.
+        # The oracle, cluster and toolchain checks below apply exactly as in strict mode.
+        if p.get("mode") != "candidate":
+            refuse(f"{f}: candidate mode judges only candidate-mode results, and this one "
+                   f"was produced in mode {p.get('mode', 'strict' if p.get('strict') else 'advisory')!r}. "
+                   "Re-run with PARITY_MODE=candidate.")
+        c = p.get("candidate") or {}
+        ch, cc = c.get("harness", {}), c.get("client_rust", {})
+        if ch.get("digest") != cur_harness:
+            refuse(f"{f}: produced by a harness with digest {ch.get('digest')}, but the harness "
+                   f"here now has digest {cur_harness}. The harness is the instrument; re-run "
+                   "with the harness that is judging the result.")
+        if p["client_rust"].get("pinned_rev") != pins["client_rust"]["rev"]:
+            refuse(f"{f}: produced against the pin {p['client_rust'].get('pinned_rev')}, but "
+                   f"pins.toml now names {pins['client_rust']['rev']}")
+        if cc.get("contains_pin") is not True:
+            refuse(f"{f}: the client-rust tree does not contain the pin, so its verdict mixes "
+                   "the change with everything between the two revisions")
+        if cc.get("digest") != cur_client_rust:
+            refuse(f"{f}: produced against a client-rust tree with digest {cc.get('digest')}, "
+                   f"but the tree cargo builds now has digest {cur_client_rust}")
+    else:
+        if p.get("strict") is not True:
+            refuse(f"{f}: produced with strict:false — not admissible as evidence")
+        strict_subject_and_harness(f, p)
+
+    oracle_cluster_toolchain(f, p)
 PY
 
 # ── 2. THE ORACLE MUST BE THE PINNED ORACLE, AS THE BINARY ITSELF REPORTS IT ─────────
@@ -222,14 +302,18 @@ for gap in ledger.get("gap", []):
 PY
 
 # ── 3. THE VERDICT ───────────────────────────────────────────────────────────────────
-python3 - "$LEDGER" <<'PY'
+python3 - "$LEDGER" "$MODE" "$GAP" <<'PY'
 import json, pathlib, sys, tomllib
 
 ledger = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
-rc = 0
+mode, declared_gap = sys.argv[2], sys.argv[3]
+outcome = {}
 
 for gap in ledger.get("gap", []):
     gid, scen = gap["id"], gap["scenario"]
+    # In candidate mode the declared gap's outcome is the RESULT being reported, so the
+    # advice written for a pinned run (re-pin, flip the entry) does not apply to it.
+    reported = mode == "candidate" and gid == declared_gap
     # The runner names its artifacts after the scenario's JSON `name`, NOT its filename.
     # Deriving the path from the filename stem instead would report a perfectly fresh
     # result as MISSING the moment the two differ — and the admissibility section above
@@ -243,7 +327,7 @@ for gap in ledger.get("gap", []):
 
     if not dpath.exists():
         print(f"\nMISSING — no result for `{name}`. An absence is never an answer.", file=sys.stderr)
-        rc = 1
+        outcome[gid] = "MISSING"
         continue
 
     observed = json.loads(dpath.read_text())["divergences"]
@@ -253,6 +337,7 @@ for gap in ledger.get("gap", []):
     if gap["expect"] == "agrees":
         if not obs:
             print("    HOLDS — the two clients agree on every compared field.")
+            outcome[gid] = "HOLDS"
         else:
             print(f"""
 NEW GAP — {gid} is declared to AGREE, and it did not.
@@ -263,13 +348,17 @@ a finding and declare it here, or fix it.
 """, file=sys.stderr)
             for d in sorted(obs):
                 print(f"    {d[0]} · {d[1]}\n        oracle : {d[2]}\n        subject: {d[3]}", file=sys.stderr)
-            rc = 1
+            outcome[gid] = "NEW GAP"
         continue
 
     # expect == "diverges"
     declared = {(d["step"], d["path"], d["oracle"], d["subject"]) for d in gap.get("divergence", [])}
 
     if not obs:
+        outcome[gid] = "XCONVERGE"
+        if reported:
+            print(f"    XCONVERGE — the two clients AGREED; {gid} is declared to diverge.")
+            continue
         print(f"""
 XCONVERGE — {gid} is declared to DIVERGE, and the two clients AGREED.
 
@@ -283,7 +372,6 @@ failure on purpose: the pin, the README's verdict, and this ledger entry are now
   3. flip this entry to status = "FIXED" and expect = "agrees" — it becomes a permanent
      REGRESSION GUARD. Do not delete it: the day the fix regresses, this is what catches it.
 """, file=sys.stderr)
-        rc = 1
         continue
 
     missing = declared - obs
@@ -294,6 +382,7 @@ failure on purpose: the pin, the README's verdict, and this ledger entry are now
               f"({len(declared)} field(s)).")
         for d in sorted(declared):
             print(f"      {d[0]} · {d[1]}: oracle={d[2]!r} subject={d[3]!r}")
+        outcome[gid] = "XDIVERGE"
         continue
 
     print(f"""
@@ -310,14 +399,43 @@ the ledger must be re-stated to say what is actually true.
     for d in sorted(extra):
         print(f"    OBSERVED BUT NOT DECLARED: {d[0]} · {d[1]}\n"
               f"        oracle={d[2]!r} subject={d[3]!r}", file=sys.stderr)
-    rc = 1
+    outcome[gid] = "WRONG DIVERGENCE"
+
+# A claim holds when it came out as declared: HOLDS for `agrees`, XDIVERGE for `diverges`.
+broken = {g: o for g, o in outcome.items() if o not in ("HOLDS", "XDIVERGE")}
 
 print()
-if rc == 0:
+if mode == "candidate":
+    others = {g: o for g, o in outcome.items() if g != declared_gap}
+    others_broken = sorted(g for g in others if g in broken)
+    # Written before the exit, pass or fail: the caller decides what the declared gap's
+    # outcome means for its change, and needs it even when another gap broke.
+    pathlib.Path("results/candidate-verdict.json").write_text(json.dumps({
+        "schema": "parity-candidate-verdict/v1",
+        "gap": declared_gap,
+        "outcome": outcome[declared_gap],
+        "others_hold": not others_broken,
+        "others": others,
+        "provenance": json.loads(pathlib.Path("results/provenance.json").read_text())
+                      .get("candidate"),
+    }, indent=2) + "\n")
+    print(f"CANDIDATE — not evidence. {declared_gap}: {outcome[declared_gap]}.")
+    if outcome[declared_gap] == "MISSING":
+        print(f"CANDIDATE: {declared_gap} has no result, so there is no outcome to report.",
+              file=sys.stderr)
+        sys.exit(1)
+    if others_broken:
+        print("CANDIDATE: other claims do NOT hold: "
+              + ", ".join(f"{g} {others[g]}" for g in others_broken), file=sys.stderr)
+        sys.exit(1)
+    print("CANDIDATE: every other claim holds. Outcome -> results/candidate-verdict.json")
+    sys.exit(0)
+
+if not broken:
     print("LEDGER: every claim holds at the pinned revisions.")
-else:
-    print("LEDGER: the claims do NOT match what was observed.", file=sys.stderr)
-sys.exit(rc)
+    sys.exit(0)
+print("LEDGER: the claims do NOT match what was observed.", file=sys.stderr)
+sys.exit(1)
 PY
 rc=$?
 
