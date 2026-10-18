@@ -182,6 +182,31 @@ class LedgerCheckCandidate(Scratch):
         self.assertEqual(r.returncode, 2)
         self.assertIn("adds G-0099, which is not the declared gap", r.stderr)
 
+    def test_a_scenario_cannot_take_another_gaps_name(self):
+        # The re-review's reproduction: a new scenario named like G-0001's overwrites its
+        # result, while G-0001's own entry and scenario stay byte-identical to the base.
+        src = json.loads((self.h / "scenarios" / "orphaned-lock-resolution.json").read_text())
+        (self.h / "scenarios" / "zz-new.json").write_text(json.dumps(src))
+        self.stamp()
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("share the scenario name 'orphaned-lock-resolution'", r.stderr)
+        self.assertEqual(self.check().returncode, 2)
+
+    def test_refuses_a_change_to_the_pins(self):
+        with open(self.h / "pins.toml", "a") as f:
+            f.write("\n# moved\n")
+        self.stamp()
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("the change edits pins.toml", r.stderr)
+
+    def test_refuses_an_unpinned_rust_compiler(self):
+        self.edit_results(lambda p: p["toolchain"].update(rust_matches_pin=False))
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not the pinned Rust toolchain", r.stderr)
+
     def test_refuses_results_from_another_base(self):
         self.edit_results(lambda p: p["candidate"]["harness"].update(base="0" * 40))
         r = self.candidate()
@@ -210,7 +235,7 @@ class LedgerCheckCandidate(Scratch):
         self.assertIn("client-rust tree with digest", r.stderr)
 
     def test_refuses_a_changed_harness(self):
-        (self.h / "scenarios" / "new.json").write_text("{}")
+        (self.h / "scripts" / "new.sh").write_text("")
         r = self.candidate()
         self.assertEqual(r.returncode, 2)
         self.assertIn("produced by a harness with digest", r.stderr)
@@ -338,14 +363,16 @@ class TreeDigest(Scratch):
         (self.cr / "src" / "hidden.rs").write_text("")
         self.assertNotEqual(digest(self.cr), base, ".git/info/exclude must not hide a file")
 
-    def test_refuses_a_symlink_out_of_the_tree(self):
-        (self.cr / "src" / "inside.rs").symlink_to("lib.rs")
-        digest(self.cr)  # inside the tree: fine
-        (self.cr / "src" / "outside.rs").symlink_to(self.tmp / "elsewhere.rs")
+    def test_refuses_any_symlink(self):
+        # Even one inside the tree: its target may be ignored (target/), so not digested.
+        (self.cr / "target").mkdir()
+        (self.cr / "target" / "gen.rs").write_text("")
+        (self.cr / ".gitignore").write_text("target\n")
+        (self.cr / "src" / "gen.rs").symlink_to("../target/gen.rs")
         r = subprocess.run([sys.executable, "-I", str(DIGEST), str(self.cr)],
                            capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("symlink out of the tree", r.stderr)
+        self.assertIn("is a symlink", r.stderr)
 
     def test_writes_nothing_into_the_repository(self):
         (self.cr / "src" / "new.rs").write_text("fn x() {}\n")

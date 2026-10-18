@@ -203,6 +203,13 @@ fi
 # The Rust side has never had this hole — rust-toolchain.toml makes cargo FETCH the
 # pinned channel — but nothing was doing the equivalent job for Go.
 GO_TC_PIN=$(pin toolchain.go)
+# And the Rust compiler. rust-toolchain.toml makes cargo fetch the pinned channel, and
+# check-pins.sh holds that file to pins.toml, which covers a committed harness. A
+# candidate may edit both files, so the compiler that actually runs is checked here too.
+RUST_TC_PIN=$(pin toolchain.rust)
+rust_toolchain=$(rustc -V 2>/dev/null | awk '{print $2}')
+[ -n "$rust_toolchain" ] || rust_toolchain=absent
+if [ "$rust_toolchain" = "$RUST_TC_PIN" ]; then rust_tc_on_pin=true; else rust_tc_on_pin=false; fi
 go_toolchain="absent"
 go_tc_on_pin=false
 if command -v go >/dev/null 2>&1; then
@@ -282,6 +289,8 @@ cat > "$OUT" <<EOF
   },
   "toolchain": {
     "rust": "$(rustc -V 2>/dev/null || echo unknown)",
+    "pinned_rust": "$RUST_TC_PIN",
+    "rust_matches_pin": $rust_tc_on_pin,
     "go": "$go_toolchain",
     "pinned_go": "$GO_TC_PIN",
     "go_matches_pin": $go_tc_on_pin
@@ -325,6 +334,21 @@ EOF
     exit 1
   fi
   echo "  go:          OFF PIN — $go_toolchain != $GO_TC_PIN (advisory; CI refuses this)" >&2
+fi
+
+if [ "$rust_tc_on_pin" = false ]; then
+  if [ "$ENFORCE" = 1 ]; then
+    cat >&2 <<EOF
+
+REFUSING TO RUN: rustc is $rust_toolchain, but the pin names $RUST_TC_PIN.
+
+A result built by a different compiler than the pin names is not a result from the
+pinned world. Restore rust-toolchain.toml (cargo then fetches $RUST_TC_PIN), or re-pin
+toolchain.rust (a reviewed change).
+EOF
+    exit 1
+  fi
+  echo "  rust:        OFF PIN — $rust_toolchain != $RUST_TC_PIN (advisory; CI refuses this)" >&2
 fi
 
 # ── The cluster gate ─────────────────────────────────────────────────────────
