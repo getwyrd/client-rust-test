@@ -79,6 +79,9 @@ def check_ledger(root: Path, errors: list[str]) -> None:
     for key in sorted(set(ledger) - {"schema", "gap"}):
         err("-", "§4.1.1", f"unknown top-level key {key!r}")
     gaps = ledger.get("gap", [])
+    if not isinstance(gaps, list) or not all(isinstance(g, dict) for g in gaps):
+        err("-", "§4.1.1", "`gap` must be an array of [[gap]] tables")
+        return
     if not gaps:
         err("-", "§4.1.2", "declares no gaps")
 
@@ -102,14 +105,15 @@ def check_ledger(root: Path, errors: list[str]) -> None:
         for key, pattern in (("slug", PLAIN), ("area", AREA)):
             if key in gap and not (isinstance(gap[key], str) and pattern.fullmatch(gap[key])):
                 err(gid, "§4.2", f"{key} {gap[key]!r} does not match {pattern.pattern}")
-        if "kind" in gap and gap["kind"] not in KINDS:
+        if "kind" in gap and str(gap["kind"]) not in KINDS:
             err(gid, "§4.2", f"kind {gap['kind']!r} is not one of {sorted(KINDS)}")
         for key in ("title", "expectation"):
             if key in gap and not (isinstance(gap[key], str) and gap[key].strip()):
                 err(gid, "§4.2", f"{key} must be non-empty text")
         if "title" in gap and "\n" in str(gap["title"]):
             err(gid, "§4.2", "title must be one line")
-        status, expect = gap.get("status"), gap.get("expect")
+        # str(): a non-string value is reported as a wrong value, never crashes the check.
+        status, expect = str(gap.get("status")), str(gap.get("expect"))
         if status not in STATUS_EXPECT:
             err(gid, "§4.2", f"status {status!r} is not one of {sorted(STATUS_EXPECT)}")
         elif expect != STATUS_EXPECT[status]:
@@ -125,6 +129,9 @@ def check_ledger(root: Path, errors: list[str]) -> None:
                 err(gid, "§4.2.4", f"{key} names {gap[key]!r}, which does not exist")
 
         divs = gap.get("divergence", [])
+        if not isinstance(divs, list):
+            err(gid, "§4.2", "divergence must be an array of [[gap.divergence]] tables")
+            divs = []
         if expect == "diverges" and not divs:
             err(gid, "§4.2", "a `diverges` entry needs at least one [[gap.divergence]]")
         if expect == "agrees" and "divergence" in gap:
@@ -133,6 +140,8 @@ def check_ledger(root: Path, errors: list[str]) -> None:
         # The scenario that is this entry's evidence (§4.4).
         scen_ref = gap.get("scenario")
         if not isinstance(scen_ref, str):
+            if "scenario" in gap:
+                err(gid, "§4.4.1", f"scenario must be a repo path, not {scen_ref!r}")
             continue
         scen_path = root / scen_ref
         if scen_path.parent != root / "scenarios" or not scen_path.is_file():
@@ -151,8 +160,10 @@ def check_ledger(root: Path, errors: list[str]) -> None:
             continue
         if scen.get("gap") != gid:
             err(gid, "§4.4.1", f"{scen_ref} was written for {scen.get('gap')!r}, not {gid}")
-        step_ids = {s.get("id") for s in scen.get("steps", []) if isinstance(s, dict)}
-        paths = defaults | (opt_in & set(scen.get("also_compare", [])))
+        steps = scen.get("steps", [])
+        step_ids = {s.get("id") for s in (steps if isinstance(steps, list) else []) if isinstance(s, dict)}
+        also = scen.get("also_compare", [])
+        paths = defaults | (opt_in & set(also if isinstance(also, list) else []))
         for i, d in enumerate(divs):
             where = f"divergence #{i + 1}"
             if not isinstance(d, dict):

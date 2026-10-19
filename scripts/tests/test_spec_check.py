@@ -126,6 +126,28 @@ class SpecCheck(unittest.TestCase):
         self.write_scenario("raw-checksum", s)
         self.assertFails("ledger/v1 §4.4.1", "written for 'G-0001'")
 
+    def test_scenario_that_is_not_a_path(self):
+        self.edit("ledger.toml", 'scenario = "scenarios/raw-checksum.json"', 'scenario = 123')
+        self.assertFails("ledger/v1 §4.4.1", "not 123")
+
+    def test_a_wrongly_typed_value_is_reported_not_crashed_on(self):
+        # Each field of the G-0002 entry, set to an array and to a table in turn: spec-check
+        # must name the entry, never raise.
+        base = (self.root / "ledger.toml").read_text()
+        entry = base.index('id     = "G-0002"')
+        for key in ("id", "slug", "kind", "area", "status", "title", "expectation", "scenario",
+                    "expect", "roadmap", "rules"):
+            for value in ("[1]", "{ a = 1 }"):
+                m = re.compile(rf"^{key} *= .*$", re.M).search(base, entry)
+                self.assertIsNotNone(m, key)
+                (self.root / "ledger.toml").write_text(base[:m.start()] + f"{key} = {value}" + base[m.end():])
+                errors = spec_check.check(self.root)
+                self.assertTrue(errors, f"{key} = {value} passed")
+        # `divergence` as one table instead of an array of tables.
+        one = base.replace("[[gap.divergence]]", "[gap.divergence]", 1).split("[[gap.divergence]]")[0]
+        (self.root / "ledger.toml").write_text(one)
+        self.assertTrue(spec_check.check(self.root))
+
     def test_two_entries_naming_one_scenario(self):
         self.edit("ledger.toml", 'scenario = "scenarios/raw-checksum.json"',
                   'scenario = "scenarios/orphaned-lock-resolution.json"')
