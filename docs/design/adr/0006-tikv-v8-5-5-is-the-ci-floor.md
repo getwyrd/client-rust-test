@@ -24,7 +24,8 @@ not simply add behaviour.
 Every ledger claim is stated against TiKV and PD v8.5.5, the version client-rust's CI uses.
 
 - `pins.toml [cluster]` pins v8.5.5 by tag and digest. `provenance/v1` §4.5 states the
-  shape, and `make spec-check` (part of `make check`) refuses an image without a digest.
+  shape, and `make spec-check` (part of `make check`, added by #73) refuses an image
+  without a digest.
 - A strict run against any other observed version is refused (provenance/v1 §4.2.2).
 - Other versions are pinned the same way under `[cluster.versions]` (`make pins-check`
   refuses one without a digest) and leased with
