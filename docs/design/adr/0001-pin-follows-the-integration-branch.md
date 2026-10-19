@@ -1,8 +1,8 @@
 ---
 created: 17.10.2026
 type: adr
-status: Proposed
-decided:
+status: Accepted
+decided: 20.10.2026
 tags:
   - adr
 ---
