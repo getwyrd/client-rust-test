@@ -60,6 +60,12 @@ def projection_paths(root: Path) -> tuple[set[str], set[str]]:
     return const("DEFAULT_PATHS"), const("OPT_IN_PATHS")
 
 
+def text(value: object) -> str | None:
+    """The value if it is a string, else None. Every set or dict lookup below goes through
+    this, so a wrongly typed value (an array, a table) is reported, never raised on."""
+    return value if isinstance(value, str) else None
+
+
 def repo_path(root: Path, value: str) -> Path:
     """The file part of a `path [section]` reference (ledger/v1 §4.2)."""
     return root / value.split(" ", 1)[0]
@@ -105,15 +111,14 @@ def check_ledger(root: Path, errors: list[str]) -> None:
         for key, pattern in (("slug", PLAIN), ("area", AREA)):
             if key in gap and not (isinstance(gap[key], str) and pattern.fullmatch(gap[key])):
                 err(gid, "§4.2", f"{key} {gap[key]!r} does not match {pattern.pattern}")
-        if "kind" in gap and str(gap["kind"]) not in KINDS:
+        if "kind" in gap and text(gap["kind"]) not in KINDS:
             err(gid, "§4.2", f"kind {gap['kind']!r} is not one of {sorted(KINDS)}")
         for key in ("title", "expectation"):
             if key in gap and not (isinstance(gap[key], str) and gap[key].strip()):
                 err(gid, "§4.2", f"{key} must be non-empty text")
         if "title" in gap and "\n" in str(gap["title"]):
             err(gid, "§4.2", "title must be one line")
-        # str(): a non-string value is reported as a wrong value, never crashes the check.
-        status, expect = str(gap.get("status")), str(gap.get("expect"))
+        status, expect = text(gap.get("status")), text(gap.get("expect"))
         if status not in STATUS_EXPECT:
             err(gid, "§4.2", f"status {status!r} is not one of {sorted(STATUS_EXPECT)}")
         elif expect != STATUS_EXPECT[status]:
@@ -164,9 +169,10 @@ def check_ledger(root: Path, errors: list[str]) -> None:
         if scen.get("gap") != gid:
             err(gid, "§4.4.1", f"{scen_ref} was written for {scen.get('gap')!r}, not {gid}")
         steps = scen.get("steps", [])
-        step_ids = {s.get("id") for s in (steps if isinstance(steps, list) else []) if isinstance(s, dict)}
+        step_ids = {text(s.get("id")) for s in (steps if isinstance(steps, list) else [])
+                    if isinstance(s, dict)} - {None}
         also = scen.get("also_compare", [])
-        paths = defaults | (opt_in & set(also if isinstance(also, list) else []))
+        paths = defaults | (opt_in & {text(a) for a in (also if isinstance(also, list) else [])})
         for i, d in enumerate(divs):
             where = f"divergence #{i + 1}"
             if not isinstance(d, dict):
@@ -179,9 +185,9 @@ def check_ledger(root: Path, errors: list[str]) -> None:
             for key in sorted(DIVERGENCE_FIELDS & set(d)):
                 if not isinstance(d[key], str):
                     err(gid, "§4.2", f"{where}: {key} must be a string")
-            if d.get("step") not in step_ids:
+            if text(d.get("step")) not in step_ids:
                 err(gid, "§4.4.3", f"{where}: step {d.get('step')!r} is not a step of {scen_ref}")
-            if d.get("path") not in paths:
+            if text(d.get("path")) not in paths:
                 err(gid, "§4.4.4", f"{where}: path {d.get('path')!r} is not projected for "
                     f"{scen_ref} (default paths, plus the opt-in paths it lists)")
 
@@ -200,14 +206,15 @@ def check_scenarios(root: Path, errors: list[str]) -> None:
         except ValueError as e:
             errors.append(f"{ref}: not JSON: {e} (scenario/v1 §4.1)")
             continue
-        name = scen.get("name") if isinstance(scen, dict) else None
+        name = text(scen.get("name")) if isinstance(scen, dict) else None
         if name != f.stem:
             errors.append(f"{ref}: name {name!r} must equal the file name {f.stem!r} "
                           "(scenario/v1 §4.1.3)")
-        if name in names:
+        if name is not None and name in names:
             errors.append(f"{ref}: shares the name {name!r} with {names[name]} "
                           "(scenario/v1 §4.1.3)")
-        names[name] = ref
+        if name is not None:
+            names[name] = ref
 
 
 def check_pins(root: Path, errors: list[str]) -> None:
