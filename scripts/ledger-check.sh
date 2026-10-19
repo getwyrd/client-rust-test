@@ -52,14 +52,14 @@ case "$MODE" in
 esac
 cur_harness=""; cur_client_rust=""
 if [ "$MODE" = candidate ]; then
+  # Never leave a previous run's verdict behind for a caller to read after a refusal.
+  rm -f results/candidate-verdict.json
   # The base checks below compare pins.toml and ledger.toml with the base. Another file
   # named by PINS or LEDGER would be judged by claims the base never had.
   if [ "$PINS" != pins.toml ] || [ "$LEDGER" != ledger.toml ]; then
     echo "ledger-check: candidate mode reads only pins.toml and ledger.toml (got PINS=$PINS LEDGER=$LEDGER)" >&2
     exit 2
   fi
-  # Never leave a previous run's verdict behind for a caller to read after a refusal.
-  rm -f results/candidate-verdict.json
   if ! python3 -c "
 import sys,tomllib,pathlib
 ids=[g['id'] for g in tomllib.loads(pathlib.Path('$LEDGER').read_text()).get('gap',[])]
@@ -329,7 +329,8 @@ for f in results:
         if cc.get("contains_pin") is not True:
             refuse(f"{f}: the client-rust tree does not contain the pin, so its verdict mixes "
                    "the change with everything between the two revisions")
-        if p.get("toolchain", {}).get("rust_matches_pin") is not True:
+        if p.get("toolchain", {}).get("pinned_rust") != pins["toolchain"]["rust"] \
+                or p.get("toolchain", {}).get("rust_matches_pin") is not True:
             refuse(f"{f}: built with {p.get('toolchain', {}).get('rust')}, not the pinned "
                    "Rust toolchain. A candidate may edit rust-toolchain.toml, so the "
                    "compiler that ran is checked, not assumed.")
