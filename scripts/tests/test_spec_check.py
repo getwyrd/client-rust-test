@@ -115,6 +115,19 @@ class SpecCheck(unittest.TestCase):
                   'rules   = "docs/client-rules-v2.md RAW-4"')
         self.assertFails("ledger/v1 §4.2.4", "rules")
 
+    def test_a_named_file_must_be_inside_the_repository(self):
+        # Both files exist; neither is a repo path.
+        outside = self.root.parent / f"{self.root.name}-outside.md"
+        outside.write_text("x")
+        self.addCleanup(outside.unlink)
+        for ref in (str(outside), f"../{outside.name}"):
+            with self.subTest(ref=ref):
+                self.edit("ledger.toml", 'rules   = "docs/design/specs/client-rules/v1.md RAW-4"',
+                          f'rules   = "{ref} RAW-4"')
+                self.assertFails("ledger/v1 §4.2.4", "not a path inside the repository")
+                self.edit("ledger.toml", f'rules   = "{ref} RAW-4"',
+                          'rules   = "docs/design/specs/client-rules/v1.md RAW-4"')
+
     def test_oracle_wrong_is_reserved(self):
         self.edit("ledger.toml", 'id     = "G-0002"',
                   'id     = "G-0002"\noracle_wrong = { declared_by = "x", date = "2026-10-19", evidence = "y" }')
@@ -253,6 +266,14 @@ class SpecCheck(unittest.TestCase):
         pins = (self.root / "pins.toml").read_text()
         (self.root / "pins.toml").write_text(pins.split("[toolchain]")[0])
         self.assertFails("provenance/v1 §4.5", "[toolchain] is missing")
+
+    def test_pins_cluster_that_is_not_a_table(self):
+        pins = (self.root / "pins.toml").read_text()
+        head, rest = pins.split("[cluster]", 1)
+        tail = rest.split("[toolchain]", 1)[1]
+        (self.root / "pins.toml").write_text(
+            head.replace('schema', 'cluster = "v8.5.5"\nschema', 1) + "[toolchain]" + tail)
+        self.assertFails("provenance/v1 §4.5", "[cluster] is missing")
 
 
 if __name__ == "__main__":

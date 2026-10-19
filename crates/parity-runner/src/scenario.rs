@@ -209,6 +209,20 @@ impl Scenario {
         if active.is_empty() {
             return Err("no step executes a command, so the scenario observes nothing".to_owned());
         }
+        // Every binding names a driver that exists. An unknown one would pass every check
+        // here and only fail when the run starts, after a cluster has been leased.
+        for run in &self.runs {
+            if let Some((role, driver)) = run
+                .bind
+                .iter()
+                .find(|(_, d)| !matches!(d.as_str(), "rust" | "go"))
+            {
+                return Err(format!(
+                    "run `{}` binds `{role}` to `{driver}`; a binding is `rust` or `go`",
+                    run.name
+                ));
+            }
+        }
         if active.iter().all(|r| bind_a.get(*r) == bind_b.get(*r)) {
             return Err(format!(
                 "runs `{a}` and `{b}` route every EXECUTING role ({active:?}) to the same \
@@ -233,6 +247,12 @@ impl Scenario {
             if !ids.insert(&step.id) {
                 return Err(format!("duplicate step id `{}`", step.id));
             }
+            let op = step.cmd.get("op").and_then(|o| o.as_str());
+            // Only the runner's own `sleep` has no role. A driver command without one
+            // would pass here and stop the run when it reached that step.
+            if step.role.is_none() && op != Some("sleep") {
+                return Err(format!("step `{}`: only `sleep` may omit a role", step.id));
+            }
             if let Some(role) = &step.role {
                 if !self.roles.contains(role) {
                     return Err(format!(
@@ -247,7 +267,6 @@ impl Scenario {
             // base64 argument is worse than that — it decodes to EMPTY bytes, both
             // drivers agree on the empty key, and the ledger certifies a scenario nobody
             // wrote. (`sleep` is the runner's own op and is not a driver command.)
-            let op = step.cmd.get("op").and_then(|o| o.as_str());
 
             // `hello` is the RUNNER's handshake, not a scenario step: the driver answers
             // it with a `hello`, not an observation, so a step using it would deserialize
@@ -316,6 +335,24 @@ impl Scenario {
                     ));
                 }
             }
+        }
+        // client-go is the oracle and client-rust the subject, never the other way round:
+        // `compare` lists the oracle first, so a role that differs must go from `go` to
+        // `rust`. Reversed, the runner would report client-go's behaviour as the subject's
+        // divergence, and the ledger would certify it.
+        if let Some(r) = active.iter().find(|r| {
+            bind_a.get(**r) != bind_b.get(**r)
+                && (
+                    bind_a.get(**r).map(String::as_str),
+                    bind_b.get(**r).map(String::as_str),
+                ) != (Some("go"), Some("rust"))
+        }) {
+            return Err(format!(
+                "role `{r}` is bound to {:?} in `{a}` and {:?} in `{b}`. `compare` lists the \
+                 oracle run first, so a role that differs must go from `go` to `rust`.",
+                bind_a.get(*r),
+                bind_b.get(*r)
+            ));
         }
         Ok(())
     }
@@ -543,6 +580,46 @@ mod tests {
         ] {
             assert!(parse(&with(bad)).unwrap_err().contains(why), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_driver_command_without_a_role_is_rejected() {
+        // One step with a role keeps the scenario active, so only the role check can
+        // catch the second.
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}},
+                {"id":"b","cmd":{"op":"close_client","name":"c"}}]"#,
+            RUNS,
+        );
+        assert!(parse(&s)
+            .unwrap_err()
+            .contains("only `sleep` may omit a role"));
+    }
+
+    #[test]
+    fn a_binding_to_an_unknown_driver_is_rejected() {
+        let runs =
+            r#"[{"name":"oracle","bind":{"r":"go"}},{"name":"subject","bind":{"r":"bogus"}}]"#;
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
+            runs,
+        );
+        assert!(parse(&s).unwrap_err().contains("`rust` or `go`"));
+    }
+
+    #[test]
+    fn the_oracle_run_must_come_first() {
+        let s = scenario_json(
+            r#"["subject","oracle"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
+            RUNS,
+        );
+        assert!(parse(&s).unwrap_err().contains("from `go` to `rust`"));
     }
 
     #[test]

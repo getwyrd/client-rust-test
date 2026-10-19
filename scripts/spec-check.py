@@ -66,9 +66,15 @@ def text(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def repo_path(root: Path, value: str) -> Path:
-    """The file part of a `path [section]` reference (ledger/v1 §4.2)."""
-    return root / value.split(" ", 1)[0]
+def repo_path(root: Path, value: str) -> Path | None:
+    """The file part of a `path [section]` reference (ledger/v1 §4.2), or None if it is
+    absolute or resolves outside the repository: those are not repo paths, however real
+    the file they name."""
+    part = value.split(" ", 1)[0]
+    if Path(part).is_absolute():
+        return None
+    path = (root / part).resolve()
+    return path if path.is_relative_to(root.resolve()) else None
 
 
 def check_ledger(root: Path, errors: list[str]) -> None:
@@ -130,7 +136,12 @@ def check_ledger(root: Path, errors: list[str]) -> None:
             if key in gap and not (isinstance(gap[key], str) and URL.fullmatch(gap[key])):
                 err(gid, "§4.2", f"{key} must be an https URL")
         for key in ("finding", "roadmap", "rules"):
-            if key in gap and not (isinstance(gap[key], str) and repo_path(root, gap[key]).is_file()):
+            if key not in gap:
+                continue
+            path = repo_path(root, gap[key]) if isinstance(gap[key], str) else None
+            if path is None:
+                err(gid, "§4.2.4", f"{key} = {gap[key]!r} is not a path inside the repository")
+            elif not path.is_file():
                 err(gid, "§4.2.4", f"{key} names {gap[key]!r}, which does not exist")
 
         divs = gap.get("divergence", [])
@@ -244,7 +255,8 @@ def check_pins(root: Path, errors: list[str]) -> None:
 
     for table, want in PINS_SHAPE.items():
         shape(table, pins.get(table), want, {"versions"} if table == "cluster" else set())
-    versions = (pins.get("cluster") or {}).get("versions", {})
+    cluster = pins.get("cluster")
+    versions = cluster.get("versions", {}) if isinstance(cluster, dict) else {}
     if not isinstance(versions, dict):
         err("[cluster.versions] must be a table")
         return
