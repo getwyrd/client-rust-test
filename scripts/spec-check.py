@@ -144,8 +144,11 @@ def check_ledger(root: Path, errors: list[str]) -> None:
                 err(gid, "§4.4.1", f"scenario must be a repo path, not {scen_ref!r}")
             continue
         scen_path = root / scen_ref
-        if scen_path.parent != root / "scenarios" or not scen_path.is_file():
-            err(gid, "§4.4.1", f"scenario {scen_ref!r} is not a file under scenarios/")
+        # One spelling only, so each scenario has one owner key: `./scenarios/x.json` and
+        # `scenarios/x.json` would otherwise count as two different scenarios.
+        if not re.fullmatch(r"scenarios/[^/]+\.json", scen_ref) or not scen_path.is_file():
+            err(gid, "§4.4.1", f"scenario {scen_ref!r} is not written as scenarios/<file>.json "
+                "naming an existing file")
             continue
         if scen_ref in claimed:
             err(gid, "§4.4.2", f"scenario {scen_ref} is already named by {claimed[scen_ref]}")
