@@ -176,7 +176,11 @@ class LedgerCheckCandidate(Scratch):
         self.assertIn("the scenario of G-0001", r.stderr)
 
     def test_the_change_cannot_add_a_second_gap(self):
+        src = json.loads((self.h / "scenarios" / "orphaned-lock-resolution.json").read_text())
+        src.update(name="extra", gap="G-0099")
+        (self.h / "scenarios" / "extra.json").write_text(json.dumps(src))
         self.edit_ledger(lambda b: b + b.replace('"G-0001"', '"G-0099"')
+                         .replace("scenarios/orphaned-lock-resolution.json", "scenarios/extra.json")
                          if 'id     = "G-0001"' in b else b)
         r = self.candidate()
         self.assertEqual(r.returncode, 2)
@@ -210,6 +214,33 @@ class LedgerCheckCandidate(Scratch):
         self.assertEqual(r.returncode, 2)
         self.assertIn("reads only pins.toml and ledger.toml", r.stderr)
 
+    def test_refuses_two_entries_with_one_id(self):
+        # Codex on #71: a second entry reusing the declared gap's id.
+        self.edit_ledger(lambda b: b + b if 'id     = "G-0002"' in b else b)
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("two entries share the id 'G-0002'", r.stderr)
+        self.assertEqual(self.check().returncode, 2)
+
+    def test_a_gap_cannot_borrow_another_gaps_scenario(self):
+        # Codex on #71: a new gap pointing at G-0002's scenario would get G-0002's result.
+        self.edit_ledger(lambda b: b + b.replace('"G-0002"', '"G-0003"')
+                         if 'id     = "G-0002"' in b else b)
+        r = self.candidate("G-0003")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("G-0003 names scenarios/raw-checksum.json, which was written for 'G-0002'",
+                      r.stderr)
+
+    def test_refuses_an_artifact_produced_for_another_gap(self):
+        f = self.results / "divergence.raw-checksum.json"
+        d = json.loads(f.read_text())
+        d["gap"] = "G-0001"
+        f.write_text(json.dumps(d))
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("was produced for gap 'G-0001', but the ledger judges it as G-0002",
+                      r.stderr)
+
     def test_refuses_a_change_to_the_pins(self):
         with open(self.h / "pins.toml", "a") as f:
             f.write("\n# moved\n")
@@ -229,6 +260,12 @@ class LedgerCheckCandidate(Scratch):
         r = self.candidate()
         self.assertEqual(r.returncode, 2)
         self.assertIn("not the pinned Rust toolchain", r.stderr)
+
+    def test_a_refused_ledger_removes_an_earlier_verdict(self):
+        self.assertEqual(self.candidate().returncode, 0)
+        self.edit_ledger(lambda b: b + b if 'id     = "G-0001"' in b else b)
+        self.assertEqual(self.candidate().returncode, 2)
+        self.assertFalse((self.results / "candidate-verdict.json").exists())
 
     def test_a_refused_pins_override_removes_an_earlier_verdict(self):
         self.assertEqual(self.candidate().returncode, 0)

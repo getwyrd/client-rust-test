@@ -31,7 +31,8 @@ export PARITY_STRICT ?= 0
 
 .PHONY: default check go-check pins-check provenance unit-test gate-test verdict failpoint-test gate \
         drivers parity ledger cluster-up cluster-down cluster-logs cluster-up-3store \
-        cluster-down-3store cluster-up-upstream cluster-down-upstream broker-test clean
+        cluster-down-3store cluster-up-upstream cluster-down-upstream broker-test clean \
+        clear-candidate-verdict
 
 default: check
 
@@ -113,8 +114,14 @@ drivers:
 # decide whether the diff was expected — that is the ledger's job. Keeping "what
 # happened" separate from "was that what we predicted" is what lets one be checked
 # against the other.
-parity: drivers provenance
+parity: clear-candidate-verdict drivers provenance
 	./target/debug/parity-runner
+
+# First, before anything can fail: a caller reads results/candidate-verdict.json even
+# after a non-zero exit (ledger-check writes it when another gap breaks), so a verdict
+# from an earlier run must never survive a run that failed before reaching ledger-check.
+clear-candidate-verdict:
+	rm -f results/candidate-verdict.json
 
 # The verdict for the parity claims: XDIVERGE / XCONVERGE / WRONG DIVERGENCE.
 # Refuses to settle anything from a run whose provenance says strict:false.
