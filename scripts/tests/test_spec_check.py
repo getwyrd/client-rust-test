@@ -126,6 +126,11 @@ class SpecCheck(unittest.TestCase):
         self.write_scenario("raw-checksum", s)
         self.assertFails("ledger/v1 §4.4.1", "written for 'G-0001'")
 
+    def test_scenario_spelled_another_way(self):
+        self.edit("ledger.toml", 'scenario = "scenarios/raw-checksum.json"',
+                  'scenario = "./scenarios/raw-checksum.json"')
+        self.assertFails("ledger/v1 §4.4.1", "scenarios/<file>.json")
+
     def test_scenario_that_is_not_a_path(self):
         self.edit("ledger.toml", 'scenario = "scenarios/raw-checksum.json"', 'scenario = 123')
         self.assertFails("ledger/v1 §4.4.1", "not 123")
@@ -162,7 +167,7 @@ class SpecCheck(unittest.TestCase):
     def test_scenario_outside_scenarios(self):
         self.edit("ledger.toml", 'scenario = "scenarios/raw-checksum.json"',
                   'scenario = "pins.toml"')
-        self.assertFails("ledger/v1 §4.4.1", "not a file under scenarios/")
+        self.assertFails("ledger/v1 §4.4.1", "scenarios/<file>.json")
 
     def test_divergence_names_an_unknown_step(self):
         self.edit("ledger.toml", 'step    = "checker-checksum"', 'step    = "checker-checksumm"')
