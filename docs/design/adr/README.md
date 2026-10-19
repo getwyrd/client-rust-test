@@ -16,7 +16,7 @@ loop's view of this harness (candidate provenance, the cluster broker, ORACLE-WR
 
 | # | Title | Decided | Status |
 |---|-------|---------|--------|
-| [0001](0001-pin-follows-the-integration-branch.md) | The client-rust pin follows the fork's `integration` branch | — | Proposed |
+| [0001](0001-pin-follows-the-integration-branch.md) | The client-rust pin follows the fork's `integration` branch | 20.10.2026 | Accepted |
 | [0002](0002-parity-is-one-directional.md) | Parity is one-directional: Rust ⊇ Go | — | Proposed |
 | [0003](0003-never-emulate-a-missing-feature.md) | Never emulate a missing feature | — | Proposed |
 | [0004](0004-the-runner-links-neither-client.md) | The runner links neither client | — | Proposed |
