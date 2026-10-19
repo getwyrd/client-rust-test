@@ -224,6 +224,18 @@ class LedgerCheckCandidate(Scratch):
         self.assertEqual(r.returncode, 2)
         self.assertIn("not the pinned Rust toolchain", r.stderr)
 
+    def test_refuses_a_compiler_pinned_by_another_file(self):
+        self.edit_results(lambda p: p["toolchain"].update(pinned_rust="1.99.0"))
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not the pinned Rust toolchain", r.stderr)
+
+    def test_a_refused_pins_override_removes_an_earlier_verdict(self):
+        self.assertEqual(self.candidate().returncode, 0)
+        r = self.check(PARITY_MODE="candidate", PARITY_GAP="G-0002", PINS="other.toml")
+        self.assertEqual(r.returncode, 2)
+        self.assertFalse((self.results / "candidate-verdict.json").exists())
+
     def test_refuses_results_from_another_base(self):
         self.edit_results(lambda p: p["candidate"]["harness"].update(base="0" * 40))
         r = self.candidate()
@@ -343,6 +355,11 @@ class Provenance(Scratch):
         r = self.run_script("provenance.sh", PARITY_MODE="candidate", PD_ADDRS="127.0.0.1:9")
         self.assertEqual(r.returncode, 1)
         self.assertIn("cargo builds tikv-client from", r.stderr)
+
+    def test_candidate_stamps_only_against_pins_toml(self):
+        r = self.run_script("provenance.sh", PARITY_MODE="candidate", PINS="other.toml")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("candidate mode reads only pins.toml", r.stderr)
 
     def test_mode_conflicts_and_typos_are_refused(self):
         r = self.run_script("provenance.sh", PARITY_STRICT="1", PARITY_MODE="candidate")

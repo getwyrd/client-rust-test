@@ -49,6 +49,12 @@ case "${PARITY_MODE:-}" in
   *) echo "provenance: PARITY_MODE must be strict, candidate or advisory, not '$PARITY_MODE'" >&2
      exit 1 ;;
 esac
+# A candidate is judged against pins.toml as it is on the harness's base (ledger-check),
+# so stamping it against another pins file would describe a different pinned world.
+if [ "$MODE" = candidate ] && [ "$PINS" != pins.toml ]; then
+  echo "provenance: candidate mode reads only pins.toml (got PINS=$PINS)" >&2
+  exit 1
+fi
 # Strict and candidate both refuse an off-pin oracle, cluster or toolchain. They differ
 # only in what they accept for the crate under test and the harness.
 if [ "$MODE" = advisory ]; then ENFORCE=0; else ENFORCE=1; fi
