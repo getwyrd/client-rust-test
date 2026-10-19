@@ -201,8 +201,16 @@ pub enum KeyArg {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawKeyArg {
+    // `default` makes a field optional; `present` refuses an explicit `null`, which a plain
+    // `Option` would read as absent.
+    #[serde(default, deserialize_with = "present")]
     s: Option<String>,
+    #[serde(default, deserialize_with = "present")]
     b64: Option<String>,
+}
+
+fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
 }
 
 impl TryFrom<RawKeyArg> for KeyArg {
@@ -370,6 +378,7 @@ mod tests {
         for bad in [
             r#"{"s":"k","b64":"aw=="}"#,
             r#"{"s":"k","typo":1}"#,
+            r#"{"s":"k","b64":null}"#,
             r#"{}"#,
         ] {
             assert!(parse(bad).is_err(), "{bad}");
