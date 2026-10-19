@@ -207,7 +207,7 @@ GO_TC_PIN=$(pin toolchain.go)
 # check-pins.sh holds that file to pins.toml, which covers a committed harness. A
 # candidate may edit both files, so the compiler that actually runs is checked here too.
 RUST_TC_PIN=$(pin toolchain.rust)
-rust_toolchain=$(rustc -V 2>/dev/null | awk '{print $2}')
+rust_toolchain=$(rustc -V 2>/dev/null | awk '{print $2}') || true
 [ -n "$rust_toolchain" ] || rust_toolchain=absent
 if [ "$rust_toolchain" = "$RUST_TC_PIN" ]; then rust_tc_on_pin=true; else rust_tc_on_pin=false; fi
 go_toolchain="absent"

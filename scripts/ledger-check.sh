@@ -52,6 +52,12 @@ case "$MODE" in
 esac
 cur_harness=""; cur_client_rust=""
 if [ "$MODE" = candidate ]; then
+  # The base checks below compare pins.toml and ledger.toml with the base. Another file
+  # named by PINS or LEDGER would be judged by claims the base never had.
+  if [ "$PINS" != pins.toml ] || [ "$LEDGER" != ledger.toml ]; then
+    echo "ledger-check: candidate mode reads only pins.toml and ledger.toml (got PINS=$PINS LEDGER=$LEDGER)" >&2
+    exit 2
+  fi
   # Never leave a previous run's verdict behind for a caller to read after a refusal.
   rm -f results/candidate-verdict.json
   if ! python3 -c "
@@ -181,11 +187,22 @@ pinned world with PARITY_STRICT=1, or iterate locally without settling the ledge
 # after the scenario's JSON `name`, not its file. Two files with one name would write the
 # same artifact, the later one winning, so a gap could be judged by another scenario's
 # result while its own scenario file is untouched.
+#
+# And the names must be PLAIN (the runner's rule, scenario.rs): they become file names,
+# so `x/../divergence.other` would differ from `other` as a string and still write over
+# its result. Run names become part of trace file names, so they are held to it too.
+import re
+plain = re.compile(r"[a-z0-9][a-z0-9-]*")
 names = {}
 for sp in sorted(pathlib.Path("scenarios").glob("*.json")):
-    n = json.loads(sp.read_text()).get("name")
-    if not n:
-        refuse(f"{sp} has no `name`, so the runner cannot name its result")
+    sc = json.loads(sp.read_text())
+    n = sc.get("name")
+    if not isinstance(n, str) or not plain.fullmatch(n):
+        refuse(f"{sp}: scenario name {n!r} is not lowercase letters, digits and `-`, so it "
+               "cannot be trusted as a file name under results/")
+    for run in sc.get("runs", []):
+        if not isinstance(run.get("name"), str) or not plain.fullmatch(run["name"]):
+            refuse(f"{sp}: run name {run.get('name')!r} is not lowercase letters, digits and `-`")
     if n in names:
         refuse(f"{names[n]} and {sp} share the scenario name {n!r}, so one overwrites the "
                "other's result and a gap could be judged by the wrong scenario")
