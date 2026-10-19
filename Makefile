@@ -32,7 +32,7 @@ export PARITY_STRICT ?= 0
 .PHONY: default check go-check pins-check provenance unit-test gate-test verdict failpoint-test gate \
         drivers parity ledger cluster-up cluster-down cluster-logs cluster-up-3store \
         cluster-down-3store cluster-up-upstream cluster-down-upstream broker-test clean \
-        clear-candidate-verdict
+        clear-candidate-verdict spec-check
 
 default: check
 
@@ -40,7 +40,7 @@ default: check
 # fault injection into every member. Name the features instead.
 CARGO_FEATURES := --features wyrd-gate/integration-tests,wyrd-gate/failpoints
 
-check: pins-check go-check broker-test
+check: pins-check spec-check go-check broker-test
 	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets $(CARGO_FEATURES) -- -D warnings
 	cargo check --workspace --all-targets $(CARGO_FEATURES)
@@ -58,6 +58,11 @@ go-check:
 # which sits on upstream history, so a gap stated against it is fileable upstream.
 pins-check:
 	./scripts/check-pins.sh
+
+# ledger.toml, scenarios/ and pins.toml against docs/design/specs/. Cluster-free; builds
+# only the runner, whose loader checks each scenario.
+spec-check:
+	./scripts/spec-check.sh
 
 # What am I about to test? Writes results/provenance.json; aborts under
 # PARITY_STRICT if the crate under test is off-pin.
@@ -189,8 +194,8 @@ cluster-up-upstream:
 cluster-down-upstream:
 	$(BROKER) release manual-upstream --missing-ok
 
-# The script tests: the broker (Docker and the readiness poll stubbed) and candidate
-# mode (over recorded results). No cluster, so they run anywhere.
+# The script tests: the broker (Docker and the readiness poll stubbed), candidate
+# mode (over recorded results) and spec-check. No cluster, so they run anywhere.
 broker-test:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
 

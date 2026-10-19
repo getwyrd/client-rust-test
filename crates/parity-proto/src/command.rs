@@ -16,7 +16,7 @@ use serde::Serialize;
 
 /// A request from the runner to a driver.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     /// Identify yourself. MUST be the first command. The reply is what
     /// `ledger-check` uses to refuse a run against the wrong client — including a
@@ -187,11 +187,42 @@ pub enum TxnMode {
 /// A byte string in a scenario: `{"s": "utf8"}` or `{"b64": "…"}`.
 ///
 /// `{P}` in an `s` is substituted with the run's unique key prefix by the runner.
+///
+/// Exactly one of the two fields, and nothing else. An untagged enum would take
+/// `{"s":"k","b64":"…"}` or `{"s":"k","typo":1}` and silently drop the rest, so both
+/// drivers could agree on bytes the author did not mean.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, try_from = "RawKeyArg")]
 pub enum KeyArg {
     Utf8 { s: String },
     B64 { b64: String },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawKeyArg {
+    // `default` makes a field optional; `present` refuses an explicit `null`, which a plain
+    // `Option` would read as absent.
+    #[serde(default, deserialize_with = "present")]
+    s: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    b64: Option<String>,
+}
+
+fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
+
+impl TryFrom<RawKeyArg> for KeyArg {
+    type Error = &'static str;
+
+    fn try_from(raw: RawKeyArg) -> Result<Self, Self::Error> {
+        match (raw.s, raw.b64) {
+            (Some(s), None) => Ok(KeyArg::Utf8 { s }),
+            (None, Some(b64)) => Ok(KeyArg::B64 { b64 }),
+            _ => Err("a byte string is exactly one of {\"s\": …} or {\"b64\": …}"),
+        }
+    }
 }
 
 impl KeyArg {
@@ -330,6 +361,32 @@ pub const PROTOCOL_VERSION: &str = "parity-cmd/v1";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_key_arg_is_exactly_one_known_field() {
+        let parse = |j: &str| serde_json::from_str::<KeyArg>(j);
+        assert_eq!(
+            parse(r#"{"s":"k"}"#).unwrap(),
+            KeyArg::Utf8 { s: "k".to_owned() }
+        );
+        assert_eq!(
+            parse(r#"{"b64":"aw=="}"#).unwrap(),
+            KeyArg::B64 {
+                b64: "aw==".to_owned()
+            }
+        );
+        for bad in [
+            r#"{"s":"k","b64":"aw=="}"#,
+            r#"{"s":"k","typo":1}"#,
+            r#"{"s":"k","b64":null}"#,
+            r#"{}"#,
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+        // And inside a command, where it is actually read.
+        let cmd = r#"{"op":"get","session":"t","key":{"s":"intended","b64":"bad"}}"#;
+        assert!(serde_json::from_str::<Command>(cmd).is_err());
+    }
 
     #[test]
     fn commands_round_trip_as_ndjson() {

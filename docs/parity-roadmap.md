@@ -37,7 +37,7 @@ Ground rules, carried over from the harness:
 
 The normative weight behind this ordering — what a TiKV client MUST, SHOULD, and CAN
 do, graded rule-by-rule against the kvproto contract — is codified in
-[client-rules.md](client-rules.md); MUST violations outrank everything below.
+[client-rules](design/specs/client-rules/v1.md); MUST violations outrank everything below.
 
 Upstream context: client-rust has **no roadmap**. #506 ("Roadmap") is a prospective user
 *asking* for one — open since 2025-11 with zero replies. The maintainers are demonstrably
@@ -332,7 +332,7 @@ Verify: `scenarios/reverse-scan-region-boundary.json` (`expect = "diverges"` tod
   (`region_request.go:1862-2203` vs `request/plan.rs:288-340`), including disk-full and
   data-not-ready handling — and the rule-RE-2 misclassification (`ServerIsBusy`/
   `MaxTimestampNotSynced` surfaced to callers instead of backed off and retried; see
-  [client-rules.md](client-rules.md), a MUST violation). Upstream asks: #310, #336, #337.
+  [client-rules](design/specs/client-rules/v1.md), a MUST violation). Upstream asks: #310, #336, #337.
 - **Region cache**: background reload/TTL (`region_cache.go:828,1809`), batched region
   loading (`ScanRegions`; `BatchScanRegions` needs W1), bounded-staleness invalidation.
   This — not the passive lookup cache that exists today (`region_cache.rs`, its own
@@ -429,7 +429,7 @@ issues and converts several of §9.2's filings into revivals of existing issues.
 2. **File what is missing** — every MUST violation first: the async-commit
    wrong-commit-ts bug (5.3); the RE-2 retry misclassification (`ServerIsBusy`/
    `MaxTimestampNotSynced` surfaced to callers instead of backed off and retried —
-   §6, [client-rules.md](client-rules.md) RE-2); service GC safepoints (5.8). Then:
+   §6, [client-rules](design/specs/client-rules/v1.md) RE-2); service GC safepoints (5.8). Then:
    typed error taxonomy (5.1); lock-wait control (5.2, or widen #483); replica/stale
    read umbrella (5.4); a TiKV/PD version-support policy (§0); the MSRV/edition
    policy question (W4); the no-importable-probes finding (§6).

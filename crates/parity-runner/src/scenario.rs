@@ -17,14 +17,15 @@ use serde::Serialize;
 pub const SCENARIO_SCHEMA: &str = "parity-scenario/v1";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Scenario {
     pub schema: String,
     pub name: String,
     /// What this scenario proves, and why the shape is what it is. Prose, for a human.
     pub doc: String,
-    /// The gap id in ledger.toml this scenario is evidence for, if any.
-    #[serde(default)]
-    pub gap: Option<String>,
+    /// The gap id in ledger.toml this scenario is evidence for. Required: a scenario no
+    /// gap names produces results nothing judges (scenario/v1 §4.1).
+    pub gap: String,
     pub roles: Vec<String>,
     pub runs: Vec<Run>,
     /// The two run names to diff, e.g. `["oracle", "subject"]`.
@@ -36,6 +37,7 @@ pub struct Scenario {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Run {
     pub name: String,
     /// role → driver ("rust" | "go").
@@ -43,6 +45,7 @@ pub struct Run {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Step {
     /// Stable id. Claims bind to IDS, never to positions — so inserting a step cannot
     /// silently re-target a ledger claim at a different observation. A claim that
@@ -70,6 +73,7 @@ pub struct Step {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Assert {
     /// The exact number of locks `scan_locks` must have returned.
     #[serde(default)]
@@ -205,6 +209,20 @@ impl Scenario {
         if active.is_empty() {
             return Err("no step executes a command, so the scenario observes nothing".to_owned());
         }
+        // Every binding names a driver that exists. An unknown one would pass every check
+        // here and only fail when the run starts, after a cluster has been leased.
+        for run in &self.runs {
+            if let Some((role, driver)) = run
+                .bind
+                .iter()
+                .find(|(_, d)| !matches!(d.as_str(), "rust" | "go"))
+            {
+                return Err(format!(
+                    "run `{}` binds `{role}` to `{driver}`; a binding is `rust` or `go`",
+                    run.name
+                ));
+            }
+        }
         if active.iter().all(|r| bind_a.get(*r) == bind_b.get(*r)) {
             return Err(format!(
                 "runs `{a}` and `{b}` route every EXECUTING role ({active:?}) to the same \
@@ -229,6 +247,12 @@ impl Scenario {
             if !ids.insert(&step.id) {
                 return Err(format!("duplicate step id `{}`", step.id));
             }
+            let op = step.cmd.get("op").and_then(|o| o.as_str());
+            // Only the runner's own `sleep` has no role. A driver command without one
+            // would pass here and stop the run when it reached that step.
+            if step.role.is_none() && op != Some("sleep") {
+                return Err(format!("step `{}`: only `sleep` may omit a role", step.id));
+            }
             if let Some(role) = &step.role {
                 if !self.roles.contains(role) {
                     return Err(format!(
@@ -243,7 +267,6 @@ impl Scenario {
             // base64 argument is worse than that — it decodes to EMPTY bytes, both
             // drivers agree on the empty key, and the ledger certifies a scenario nobody
             // wrote. (`sleep` is the runner's own op and is not a driver command.)
-            let op = step.cmd.get("op").and_then(|o| o.as_str());
 
             // `hello` is the RUNNER's handshake, not a scenario step: the driver answers
             // it with a `hello`, not an observation, so a step using it would deserialize
@@ -258,7 +281,21 @@ impl Scenario {
                 ));
             }
 
-            if op != Some("sleep") {
+            // `sleep` waits on the CLUSTER's clock, so a reader must be able to tell a
+            // principled wait from a superstitious one: it says why. Its `ms` was once
+            // checked only when the step ran, after a cluster round trip.
+            if op == Some("sleep") {
+                let fields = step.cmd.as_object().map_or(0, |o| o.len());
+                if step.cmd.get("ms").and_then(|m| m.as_u64()).is_none() || fields != 2 {
+                    return Err(format!(
+                        "step `{}`: sleep is exactly {{\"op\":\"sleep\",\"ms\":<non-negative integer>}}",
+                        step.id
+                    ));
+                }
+                if step.why.as_deref().is_none_or(|w| w.trim().is_empty()) {
+                    return Err(format!("step `{}`: a sleep must say `why`", step.id));
+                }
+            } else {
                 let cmd: parity_proto::Command = serde_json::from_value(step.cmd.clone())
                     .map_err(|e| format!("step `{}`: bad command: {e}", step.id))?;
                 for arg in cmd.args() {
@@ -298,6 +335,24 @@ impl Scenario {
                     ));
                 }
             }
+        }
+        // client-go is the oracle and client-rust the subject, never the other way round:
+        // `compare` lists the oracle first, so a role that differs must go from `go` to
+        // `rust`. Reversed, the runner would report client-go's behaviour as the subject's
+        // divergence, and the ledger would certify it.
+        if let Some(r) = active.iter().find(|r| {
+            bind_a.get(**r) != bind_b.get(**r)
+                && (
+                    bind_a.get(**r).map(String::as_str),
+                    bind_b.get(**r).map(String::as_str),
+                ) != (Some("go"), Some("rust"))
+        }) {
+            return Err(format!(
+                "role `{r}` is bound to {:?} in `{a}` and {:?} in `{b}`. `compare` lists the \
+                 oracle run first, so a role that differs must go from `go` to `rust`.",
+                bind_a.get(*r),
+                bind_b.get(*r)
+            ));
         }
         Ok(())
     }
@@ -339,7 +394,7 @@ mod tests {
 
     fn scenario_json(compare: &str, roles: &str, steps: &str, runs: &str) -> String {
         format!(
-            r#"{{"schema":"parity-scenario/v1","name":"n","doc":"d",
+            r#"{{"schema":"parity-scenario/v1","name":"n","doc":"d","gap":"G-0000",
                  "roles":{roles},"runs":{runs},"compare":{compare},"steps":{steps}}}"#
         )
     }
@@ -397,7 +452,7 @@ mod tests {
         let runs = r#"[{"name":"oracle","bind":{"r":"go","ghost":"go"}},
                        {"name":"subject","bind":{"r":"go","ghost":"rust"}}]"#;
         let s = format!(
-            r#"{{"schema":"parity-scenario/v1","name":"n","doc":"d",
+            r#"{{"schema":"parity-scenario/v1","name":"n","doc":"d","gap":"G-0000",
                  "roles":["r","ghost"],"runs":{runs},"compare":["oracle","subject"],
                  "steps":[{{"id":"a","role":"r","cmd":{{"op":"open_client","name":"c"}}}}]}}"#
         );
@@ -445,6 +500,126 @@ mod tests {
             RUNS,
         );
         assert!(parse(&s).unwrap_err().contains("handshake"));
+    }
+
+    #[test]
+    fn an_unknown_field_is_rejected_at_every_level() {
+        // A misspelt optional field used to be ignored: `also_compar` compared nothing
+        // extra, `asert` checked no precondition, and a field a command does not define
+        // was dropped before it reached a driver. Each looked like a scenario that said
+        // what its author meant (scenario/v1 §4.1.1, §4.3.1).
+        let step = r#"{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}"#;
+        let ok = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            &format!("[{step}]"),
+            RUNS,
+        );
+        assert!(parse(&ok).is_ok());
+        for (from, to) in [
+            (r#""doc":"d""#, r#""doc":"d","also_compar":["native.type"]"#),
+            (r#""role":"r","#, r#""role":"r","asert":{"class":"ok"},"#),
+            (r#""name":"c"}"#, r#""name":"c","extra":1}"#),
+            (r#"{"name":"oracle","#, r#"{"name":"oracle","note":"x","#),
+        ] {
+            let bad = ok.replacen(from, to, 1);
+            assert_ne!(bad, ok, "{from}");
+            assert!(parse(&bad).unwrap_err().contains("unknown field"), "{to}");
+        }
+    }
+
+    #[test]
+    fn a_scenario_without_a_gap_is_rejected() {
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
+            RUNS,
+        )
+        .replace(r#""gap":"G-0000","#, "");
+        assert!(parse(&s).unwrap_err().contains("missing field `gap`"));
+    }
+
+    #[test]
+    fn a_sleep_is_checked_at_load() {
+        let open = r#"{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}"#;
+        let with = |sleep: &str| {
+            scenario_json(
+                r#"["oracle","subject"]"#,
+                r#"["r"]"#,
+                &format!("[{open},{sleep}]"),
+                RUNS,
+            )
+        };
+        assert!(parse(&with(
+            r#"{"id":"s","cmd":{"op":"sleep","ms":10},"why":"ttl"}"#
+        ))
+        .is_ok());
+        for (bad, why) in [
+            (r#"{"id":"s","cmd":{"op":"sleep","ms":10}}"#, "say `why`"),
+            (
+                r#"{"id":"s","cmd":{"op":"sleep","ms":10},"why":" "}"#,
+                "say `why`",
+            ),
+            (
+                r#"{"id":"s","cmd":{"op":"sleep"},"why":"ttl"}"#,
+                "sleep is exactly",
+            ),
+            (
+                r#"{"id":"s","cmd":{"op":"sleep","ms":-1},"why":"ttl"}"#,
+                "sleep is exactly",
+            ),
+            (
+                r#"{"id":"s","cmd":{"op":"sleep","ms":"10"},"why":"ttl"}"#,
+                "sleep is exactly",
+            ),
+            (
+                r#"{"id":"s","cmd":{"op":"sleep","ms":10,"x":1},"why":"ttl"}"#,
+                "sleep is exactly",
+            ),
+        ] {
+            assert!(parse(&with(bad)).unwrap_err().contains(why), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_driver_command_without_a_role_is_rejected() {
+        // One step with a role keeps the scenario active, so only the role check can
+        // catch the second.
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}},
+                {"id":"b","cmd":{"op":"close_client","name":"c"}}]"#,
+            RUNS,
+        );
+        assert!(parse(&s)
+            .unwrap_err()
+            .contains("only `sleep` may omit a role"));
+    }
+
+    #[test]
+    fn a_binding_to_an_unknown_driver_is_rejected() {
+        let runs =
+            r#"[{"name":"oracle","bind":{"r":"go"}},{"name":"subject","bind":{"r":"bogus"}}]"#;
+        let s = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
+            runs,
+        );
+        assert!(parse(&s).unwrap_err().contains("`rust` or `go`"));
+    }
+
+    #[test]
+    fn the_oracle_run_must_come_first() {
+        let s = scenario_json(
+            r#"["subject","oracle"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
+            RUNS,
+        );
+        assert!(parse(&s).unwrap_err().contains("from `go` to `rust`"));
     }
 
     #[test]

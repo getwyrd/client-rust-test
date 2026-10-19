@@ -116,7 +116,7 @@ wyrd/
     ├── cluster/            # throwaway PD + TiKV profiles (digest-pinned), leased by scripts/cluster-broker
     ├── scripts/            # pins, provenance, the verdicts
     ├── findings/           # the harness's output: write-ups, repros, evidence
-    ├── docs/               # the roadmap, the client rules, the upstream issue map
+    ├── docs/               # the roadmap, the upstream issue map, specs and ADRs (docs/design/)
     ├── ledger.toml         # every gap, with a declared expectation
     └── pins.toml           # what is under test — the single source of truth
 ```
@@ -141,6 +141,16 @@ the pin is a commit of that branch and that its `upstream_base` is on upstream
 the parity diff at `upstream_base` — informational, never gating — to show which gaps
 are still open upstream.
 
+## Specs and decisions
+
+The formats and protocols above are specified in [`docs/design/specs/`](docs/design/specs/):
+the driver protocol, observations and the diff, scenarios, the ledger, provenance, and the
+TiKV client rules. `make spec-check` checks `ledger.toml`, `scenarios/` and `pins.toml`
+against them, and runs in `make check`. The harness's decisions are ADRs in
+[`docs/design/adr/`](docs/design/adr/). The loop that changes this repo and client-rust keeps
+its own design (risk classes, accept policy, the loop's ADRs) in
+[client-rust-pdca](https://github.com/getwyrd/client-rust-pdca/tree/main/docs/design).
+
 ## Usage
 
 ```sh
@@ -154,7 +164,8 @@ make verdict        # the gate, checked against the verdict EXPECTED at the pin
 make gate-test      # the cluster-backed gate, raw ($PD_ADDRS, default 127.0.0.1:2379)
 make failpoint-test # the failpoint proof (opt-in `failpoints` feature)
 make pins-check     # pins.toml agrees with everything; the pin is on integration, on upstream
-make check          # fmt --check, clippy -D warnings, cargo check, broker tests
+make spec-check     # ledger.toml, scenarios/ and pins.toml against docs/design/specs/
+make check          # pins-check, spec-check, fmt --check, clippy -D warnings, cargo check, script tests
 ```
 
 `make verdict` is what CI runs, and it is the one to trust. Plain pass/fail is
