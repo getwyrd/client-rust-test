@@ -153,6 +153,22 @@ class SpecCheck(unittest.TestCase):
         (self.root / "ledger.toml").write_text(one)
         self.assertTrue(spec_check.check(self.root))
 
+    def test_wrongly_typed_divergence_and_scenario_values_are_reported(self):
+        base = (self.root / "ledger.toml").read_text()
+        for key in ("step", "path", "oracle", "subject"):
+            for value in ("[1]", "{ a = 1 }"):
+                m = re.compile(rf"^{key} *= .*$", re.M).search(base, base.index("[[gap.divergence]]"))
+                (self.root / "ledger.toml").write_text(base[:m.start()] + f"{key} = {value}" + base[m.end():])
+                self.assertTrue(spec_check.check(self.root), f"divergence {key} = {value} passed")
+        (self.root / "ledger.toml").write_text(base)
+        orig = self.scenario("raw-checksum")
+        for key in ("name", "gap", "steps", "also_compare"):
+            for value in ([[1]], {"a": 1}, [{"id": [1]}]):
+                self.write_scenario("raw-checksum", {**orig, key: value})
+                spec_check.check(self.root)   # must not raise
+        self.write_scenario("raw-checksum", {**orig, "name": ["raw-checksum"]})
+        self.assertTrue(spec_check.check(self.root))
+
     def test_two_entries_naming_one_scenario(self):
         self.edit("ledger.toml", 'scenario = "scenarios/raw-checksum.json"',
                   'scenario = "scenarios/orphaned-lock-resolution.json"')
