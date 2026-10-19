@@ -140,7 +140,7 @@ scenario = "scenarios/raw-checksum.json"
 expect   = "diverges"
 
 roadmap = "docs/parity-roadmap.md §5.6"
-rules   = "docs/client-rules.md RAW-4"
+rules   = "docs/design/specs/client-rules/v1.md RAW-4"
 
 [[gap.divergence]]
 step    = "checker-checksum"

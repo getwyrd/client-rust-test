@@ -8,7 +8,7 @@ rules that make its verdicts mean something.
 
 This section is the standing rubric the loop's builder, reviewer and adversary apply
 (`client-rust-pdca` `pdca.toml` `rubric_file`). Its client rules are condensed from
-[`docs/client-rules.md`](docs/client-rules.md), which is the normative source: on any
+[`docs/design/specs/client-rules/v1.md`](docs/design/specs/client-rules/v1.md), which is the normative source: on any
 disagreement, that file wins, and this section is stale.
 
 ### Hard conventions (MUST)
@@ -33,7 +33,7 @@ disagreement, that file wins, and this section is stale.
   `cluster/images.env` instead of a hard-coded tag (the 3-store compose file is not
   checked). It does **not** check revisions quoted in
   prose: `README.md`'s gate-verdict heading and evidence must be updated by hand on a pin
-  move, and `docs/parity-roadmap.md`, `docs/client-rules.md` and
+  move, and `docs/parity-roadmap.md`, `docs/design/specs/client-rules/v1.md` and
   `docs/upstream-issue-map.md` are dated snapshots that name the revision they were written
   at — re-derive them, never edit only the revision. A loop bundle never edits `pins.toml`
   (design R3); a pin move is a human or `pin-move` bundle.
@@ -42,7 +42,7 @@ disagreement, that file wins, and this section is stale.
 - **Parity is one-directional: Rust ⊇ Go.** Rust-only surface is not a gap
   (`docs/parity-roadmap.md` §1.3).
 
-### Client rules a change to tikv-client must not break (MUST; source: docs/client-rules.md)
+### Client rules a change to tikv-client must not break (MUST; source: docs/design/specs/client-rules/v1.md)
 
 One line per rule, kept to the source's conditions. `*` marks a conditional MUST: it binds
 only if the client uses that capability. Where a line and the source differ, the source
