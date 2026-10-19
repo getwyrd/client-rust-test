@@ -50,10 +50,31 @@ case "$MODE" in
   *) echo "ledger-check: PARITY_MODE must be strict or candidate, not '$MODE' (an advisory run settles nothing)" >&2
      exit 2 ;;
 esac
+# First, before any check can refuse: never leave a previous run's verdict behind for a
+# caller to read after a refusal.
+[ "$MODE" = candidate ] && rm -f results/candidate-verdict.json
+# ── 0. ONE GAP PER ID, AND EACH GAP IS ITS SCENARIO'S ────────────────────────────────
+# Every later step keys gaps by id, so two entries with one id would be merged: a verdict
+# could report one entry while judging the other. And a gap must be the one its scenario
+# was written for (the scenario's `gap` field): otherwise a new entry could point at
+# another gap's scenario and be judged by that gap's result.
+python3 - "$LEDGER" <<'PY' || exit 2
+import json, pathlib, sys, tomllib
+
+ids = []
+for gap in tomllib.loads(pathlib.Path(sys.argv[1]).read_text()).get("gap", []):
+    gid = gap.get("id")
+    if gid in ids:
+        sys.exit(f"REFUSING TO JUDGE THE LEDGER: two entries share the id {gid!r}")
+    ids.append(gid)
+    owner = json.loads(pathlib.Path(gap["scenario"]).read_text()).get("gap")
+    if owner != gid:
+        sys.exit(f"REFUSING TO JUDGE THE LEDGER: {gid} names {gap['scenario']}, which was "
+                 f"written for {owner!r}, so its result is not evidence about {gid}")
+PY
+
 cur_harness=""; cur_client_rust=""
 if [ "$MODE" = candidate ]; then
-  # Never leave a previous run's verdict behind for a caller to read after a refusal.
-  rm -f results/candidate-verdict.json
   # The base checks below compare pins.toml and ledger.toml with the base. Another file
   # named by PINS or LEDGER would be judged by claims the base never had.
   if [ "$PINS" != pins.toml ] || [ "$LEDGER" != ledger.toml ]; then
@@ -210,7 +231,7 @@ for sp in sorted(pathlib.Path("scenarios").glob("*.json")):
 results = []
 for gap in ledger.get("gap", []):
     name = json.loads(pathlib.Path(gap["scenario"]).read_text())["name"]
-    results.append(f"results/divergence.{name}.json")
+    results.append((gap["id"], f"results/divergence.{name}.json"))
 
 if not results:
     refuse("the ledger declares no gaps — there is nothing to settle")
@@ -288,12 +309,16 @@ def oracle_cluster_toolchain(f, p):
                f"TiKV [{cl.get('observed_tikv_versions')}], but the pin names "
                f"{cl.get('pinned_version')}")
 
-for f in results:
+for gid, f in results:
     p_ = pathlib.Path(f)
     if not p_.exists():
         refuse(f"{f} is missing — the ledger names this scenario but it has not been run. "
                "Run `make parity`.")
     r = json.loads(p_.read_text())
+    # The artifact says which gap it was produced for (its scenario's `gap`). It must be
+    # the gap that names it, or another scenario's result is standing in.
+    if r.get("gap") != gid:
+        refuse(f"{f} was produced for gap {r.get('gap')!r}, but the ledger judges it as {gid}")
     p = r.get("provenance")
     if not p:
         refuse(f"{f} carries no provenance, so the world it was produced in is unknown. "
