@@ -44,7 +44,7 @@ impl Driver {
         // stdout to stderr (a stray log line would otherwise corrupt the NDJSON
         // stream), and when a run goes wrong those logs are the first thing a human
         // needs. Swallowing them would make every failure a mystery.
-        let mut child = OsCommand::new(binary)
+        let mut child = driver_command(binary, std::env::var_os("PARITY_DRIVER_WRAPPER"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -117,9 +117,52 @@ impl Driver {
     }
 }
 
+/// The command that starts a driver: the binary itself, or `<wrapper> <binary>` when
+/// `PARITY_DRIVER_WRAPPER` names a wrapper.
+///
+/// The wrapper exists for the pdca loop's T3 gate, which judges a CHANGE to client-rust
+/// or to a driver. The drivers are where that change's code runs, so they must not share
+/// the runner's sandbox: there they could write over results/ or the scripts that judge
+/// them. The gate's wrapper starts each driver in a sandbox of its own and connects its
+/// stdin and stdout back here; the drivers need nothing else, since the conversation is
+/// NDJSON over stdio. Unset (CI, a human's `make parity`), nothing changes.
+fn driver_command(binary: &std::path::Path, wrapper: Option<std::ffi::OsString>) -> OsCommand {
+    match wrapper {
+        Some(w) if !w.is_empty() => {
+            let mut c = OsCommand::new(w);
+            c.arg(binary);
+            c
+        }
+        _ => OsCommand::new(binary),
+    }
+}
+
 impl Drop for Driver {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn without_a_wrapper_the_driver_runs_itself() {
+        let bin = std::path::Path::new("target/debug/parity-driver-rust");
+        for w in [None, Some(std::ffi::OsString::new())] {
+            let c = driver_command(bin, w);
+            assert_eq!(c.get_program(), bin.as_os_str());
+            assert_eq!(c.get_args().count(), 0);
+        }
+    }
+
+    #[test]
+    fn a_wrapper_is_given_the_driver_binary() {
+        let bin = std::path::Path::new("target/debug/parity-driver-rust");
+        let c = driver_command(bin, Some("/opt/wrap".into()));
+        assert_eq!(c.get_program(), "/opt/wrap");
+        assert_eq!(c.get_args().collect::<Vec<_>>(), [bin.as_os_str()]);
     }
 }
