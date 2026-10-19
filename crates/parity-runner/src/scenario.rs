@@ -125,6 +125,24 @@ impl Scenario {
                 self.schema
             ));
         }
+        // The scenario name and every run name become file names under results/
+        // (`divergence.<name>.json`, `traces/<name>.<run>.json`). A name with `/` or `..`
+        // in it could write over another scenario's result, which ledger-check would then
+        // judge as that scenario's. So names are plain: lowercase letters, digits, `-`.
+        if !is_plain_name(&self.name) {
+            return Err(format!(
+                "scenario name `{}` must be lowercase letters, digits and `-`, starting with \
+                 a letter or digit: it becomes a file name under results/",
+                self.name
+            ));
+        }
+        if let Some(run) = self.runs.iter().find(|r| !is_plain_name(&r.name)) {
+            return Err(format!(
+                "run name `{}` must be lowercase letters, digits and `-`, starting with a \
+                 letter or digit: it becomes part of a trace file name",
+                run.name
+            ));
+        }
         if self.compare.len() != 2 {
             return Err(format!(
                 "`compare` must name exactly 2 runs, got {:?}",
@@ -285,9 +303,39 @@ impl Scenario {
     }
 }
 
+/// Lowercase ASCII letters, digits and `-`, starting with a letter or digit.
+fn is_plain_name(s: &str) -> bool {
+    let b = s.as_bytes();
+    !b.is_empty()
+        && b[0] != b'-'
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_name_that_is_not_a_plain_file_name_is_rejected() {
+        let ok = scenario_json(
+            r#"["oracle","subject"]"#,
+            r#"["r"]"#,
+            r#"[{"id":"a","role":"r","cmd":{"op":"open_client","name":"c"}}]"#,
+            RUNS,
+        );
+        for bad in ["x/../divergence.other", "../x", "a.b", "A", "-a", ""] {
+            let s = ok.replace(r#""name":"n""#, &format!(r#""name":"{bad}""#));
+            assert!(
+                parse(&s).unwrap_err().contains("becomes a file name"),
+                "{bad}"
+            );
+        }
+        let s = ok
+            .replace(r#""name":"subject""#, r#""name":"../subject""#)
+            .replace(r#""subject"]"#, r#""../subject"]"#);
+        assert!(parse(&s).unwrap_err().contains("trace file name"));
+    }
 
     fn scenario_json(compare: &str, roles: &str, steps: &str, runs: &str) -> String {
         format!(

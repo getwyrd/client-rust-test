@@ -193,6 +193,23 @@ class LedgerCheckCandidate(Scratch):
         self.assertIn("share the scenario name 'orphaned-lock-resolution'", r.stderr)
         self.assertEqual(self.check().returncode, 2)
 
+    def test_a_scenario_name_cannot_climb_out_of_results(self):
+        # The third review's reproduction: a different string that resolves to the same file.
+        src = json.loads((self.h / "scenarios" / "orphaned-lock-resolution.json").read_text())
+        src["name"] = "x/../divergence.orphaned-lock-resolution"
+        (self.h / "scenarios" / "zz-new.json").write_text(json.dumps(src))
+        self.stamp()
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("cannot be trusted as a file name", r.stderr)
+        self.assertEqual(self.check().returncode, 2)
+
+    def test_reads_only_the_default_pins_and_ledger(self):
+        shutil.copy(self.h / "pins.toml", self.h / "other.toml")
+        r = self.check(PARITY_MODE="candidate", PARITY_GAP="G-0002", PINS="other.toml")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("reads only pins.toml and ledger.toml", r.stderr)
+
     def test_refuses_a_change_to_the_pins(self):
         with open(self.h / "pins.toml", "a") as f:
             f.write("\n# moved\n")
