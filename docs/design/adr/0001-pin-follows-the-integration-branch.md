@@ -68,11 +68,13 @@ compile, and the feature is deleted.
 Such switches are confined and capped. All of the Rust driver's code that depends on a
 client-rust API the two trees spell differently lives in one module, so a switch never
 spreads through the driver. At most two switches exist at a time. A third API difference
-does not get a switch: the upstream view reports the scenarios it cannot build as
-`not buildable upstream` and compares the rest. The upstream view is never ledger
-evidence, so a scenario it cannot build costs nothing in the ledger. The list stays short
-because every bundle is also an upstream pull request and a public API change needs a
-human's approval (client-rust-pdca ADR-0015, design WP-14).
+does not get a switch. The driver is one binary, so it then does not build against
+`upstream_base` at all: the upstream view job reports `not buildable upstream` for the
+whole run and compares nothing until upstream catches up or a switch retires. The job
+never blocks a merge, and the upstream view is never ledger evidence, so going dark
+costs nothing in the ledger. The list stays short because every bundle is also an
+upstream pull request and a public API change needs a human's approval
+(client-rust-pdca ADR-0015, design WP-14).
 
 ## Consequences
 
@@ -83,7 +85,7 @@ human's approval (client-rust-pdca ADR-0015, design WP-14).
   upstream commit it sits on.
 - Every API difference between `integration` and `upstream_base` costs a feature switch in
   the Rust driver until upstream catches up, up to the cap of two. Past the cap, the
-  upstream view loses the scenarios that need the newer API until upstream catches up.
+  upstream view goes dark until upstream catches up.
 - Moving the switched arms into one module is a follow-up to this ADR; today the
   `pre-557` arms sit in `crates/rust-driver/src/mapping.rs`.
 - The upstream view is an extra cluster job per PR.
