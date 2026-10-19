@@ -54,6 +54,23 @@ use crate::trace::Trace;
 /// here and teaching `project_obs` to emit it.
 pub const OPT_IN_PATHS: &[&str] = &["native.type", "proto", "errors.count"];
 
+/// Every path `project_obs` can emit without an opt-in (observation/v1 §4.5).
+///
+/// Written out so a ledger claim's `path` can be checked without a cluster
+/// (scripts/spec-check.sh reads this list and `OPT_IN_PATHS` from this file). A test
+/// below keeps it equal to what `project_obs` actually emits.
+pub const DEFAULT_PATHS: &[&str] = &[
+    "class",
+    "unsupported.detail",
+    "class.parts",
+    "value",
+    "locks.count",
+    "locks",
+    "commit_ts",
+    "proto.present",
+    "proto.type",
+];
+
 /// What a comparison looks at, beyond the defaults.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Spec {
@@ -365,6 +382,55 @@ mod tests {
             op: "snapshot_get".to_owned(),
             observation: obs,
         }
+    }
+
+    #[test]
+    fn default_paths_are_exactly_what_the_projection_emits() {
+        // spec-check judges ledger claims against DEFAULT_PATHS. A path the projection
+        // emits but the list lacks would make a true claim fail the check; a listed path
+        // it never emits would let a claim name a field nothing compares.
+        let full = |class| {
+            let mut o = Observation::new(class)
+                .with_value(Some(b"v".to_vec()))
+                .with_commit_ts(1)
+                .with_proto(serde_json::json!({"key_error": {"locked": {}}}))
+                .with_error_count(2)
+                .with_native(NativeObs::new("rust", "T", "d"));
+            o.locks = vec![LockObs {
+                key: b"k".to_vec().into(),
+                primary: b"p".to_vec().into(),
+                kind: "put".to_owned(),
+                ttl_ms: 1,
+                txn_start_ts: 1,
+            }];
+            o
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        for class in [
+            Class::Unsupported {
+                detail: "x".to_owned(),
+            },
+            Class::Mixed {
+                parts: vec![Class::Ok],
+            },
+        ] {
+            let t = trace("p/", vec![step("s", full(class))]);
+            seen.extend(project(&t, &Spec::default())["s"].keys().cloned());
+            let all = Spec {
+                also_compare: OPT_IN_PATHS.iter().map(|p| p.to_string()).collect(),
+            };
+            let opt: std::collections::BTreeSet<_> =
+                project(&t, &all)["s"].keys().cloned().collect();
+            let extra: std::collections::BTreeSet<&str> = opt
+                .iter()
+                .map(String::as_str)
+                .filter(|p| !DEFAULT_PATHS.contains(p))
+                .collect();
+            assert_eq!(extra, OPT_IN_PATHS.iter().copied().collect());
+        }
+        let listed: std::collections::BTreeSet<_> =
+            DEFAULT_PATHS.iter().map(|p| p.to_string()).collect();
+        assert_eq!(seen, listed);
     }
 
     #[test]

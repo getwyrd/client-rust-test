@@ -18,9 +18,15 @@ use crate::run::Binaries;
 use crate::scenario::Scenario;
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let scenarios: Vec<PathBuf> = if args.len() > 1 {
-        args[1..].iter().map(PathBuf::from).collect()
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // `--check`: load and validate, run nothing (scenario/v1 §4.4). No cluster, no
+    // drivers, no provenance — this is what scripts/spec-check.sh calls.
+    let check_only = args.first().is_some_and(|a| a == "--check");
+    if check_only {
+        args.remove(0);
+    }
+    let scenarios: Vec<PathBuf> = if !args.is_empty() {
+        args.iter().map(PathBuf::from).collect()
     } else {
         // Default: every scenario in scenarios/.
         let mut v: Vec<PathBuf> = std::fs::read_dir("scenarios")
@@ -38,6 +44,20 @@ fn main() {
     if scenarios.is_empty() {
         eprintln!("no scenarios to run");
         std::process::exit(1);
+    }
+
+    if check_only {
+        let mut bad = false;
+        for path in &scenarios {
+            match Scenario::load(path) {
+                Ok(_) => println!("ok  {}", path.display()),
+                Err(e) => {
+                    eprintln!("BAD {}: {e}", path.display());
+                    bad = true;
+                }
+            }
+        }
+        std::process::exit(if bad { 1 } else { 0 });
     }
 
     let bins = Binaries {

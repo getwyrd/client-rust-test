@@ -16,7 +16,7 @@ use serde::Serialize;
 
 /// A request from the runner to a driver.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     /// Identify yourself. MUST be the first command. The reply is what
     /// `ledger-check` uses to refuse a run against the wrong client — including a
