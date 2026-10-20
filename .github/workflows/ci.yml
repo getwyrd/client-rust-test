@@ -235,6 +235,13 @@ jobs:
           features=$(echo '{"op":"hello"}' | target/debug/parity-driver-rust \
             | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["hello"]["features"]))')
           expected='^INADMISSIBLE: scenario `orphaned-lock-resolution` run `subject`: step `reader-confirms-orphan` precondition failed: expected 1 lock\(s\), observed 0'
+          # Every other scenario must have run to the end and written its diff, so a runner
+          # crash after the expected failure cannot pass as it.
+          for s in scenarios/*.json; do
+            name=$(basename "$s" .json)
+            [ "$name" = orphaned-lock-resolution ] && continue
+            grep -qF -- "-> results/divergence.$name.json" parity.log || { echo "no diff for $name"; exit 1; }
+          done
           if [[ " $features " != *" prewrite_only "* ]] \
              && grep -qE "$expected" parity.log \
              && [ "$(grep -c '^INADMISSIBLE:' parity.log)" = 1 ] \
