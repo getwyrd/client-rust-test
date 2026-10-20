@@ -221,35 +221,13 @@ jobs:
         run: cargo test -p rust-driver
       - name: build the drivers (without the test probe)
         run: make drivers DRIVER_FEATURES=
+      # G-0001's subject run builds its orphan with client-rust's probe, which
+      # upstream_base lacks, so here it is inadmissible and this step fails until upstream
+      # has the probe (tikv/client-rust#577). It fails closed on purpose: every attempt to
+      # tolerate just that failure could also hide a real one. The job is not a required
+      # check, and the artifact below is uploaded either way.
       - name: parity diff at upstream_base (informational)
-        shell: bash
-        run: |
-          set -o pipefail
-          if make parity DRIVER_FEATURES= 2>&1 | tee parity.log; then exit 0; fi
-          # The one failure tolerated here: the Rust driver, built without the probe that
-          # upstream_base lacks, could not build G-0001's orphan. Its hello must not list
-          # prewrite_only, the only inadmissible run must be G-0001's subject run with no
-          # orphan found, and nothing else may have gone wrong. Anything else fails. A Rust
-          # scan_locks regression would also make G-0003's subject run (Rust reader)
-          # inadmissible, so it cannot pass as this one.
-          features=$(echo '{"op":"hello"}' | target/debug/parity-driver-rust \
-            | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["hello"]["features"]))')
-          expected='^INADMISSIBLE: scenario `orphaned-lock-resolution` run `subject`: step `reader-confirms-orphan` precondition failed: expected 1 lock\(s\), observed 0'
-          # Every other scenario must have run to the end and written its diff, so a runner
-          # crash after the expected failure cannot pass as it.
-          for s in scenarios/*.json; do
-            name=$(basename "$s" .json)
-            [ "$name" = orphaned-lock-resolution ] && continue
-            grep -qF -- "-> results/divergence.$name.json" parity.log || { echo "no diff for $name"; exit 1; }
-          done
-          if [[ " $features " != *" prewrite_only "* ]] \
-             && grep -qE "$expected" parity.log \
-             && [ "$(grep -c '^INADMISSIBLE:' parity.log)" = 1 ] \
-             && ! grep -qE '^(error|REFUSING|RUNNER ERROR)' parity.log; then
-            echo "::warning::upstream view: G-0001's Rust run needs the test probe, which upstream_base lacks"
-            exit 0
-          fi
-          exit 1
+        run: make parity DRIVER_FEATURES=
       - name: upstream view
         if: always()
         uses: actions/upload-artifact@v4
