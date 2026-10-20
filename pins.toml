@@ -30,19 +30,19 @@ upstream = "https://github.com/tikv/client-rust.git"
 fork     = "https://github.com/getwyrd/client-rust.git"
 branch   = "integration"
 
-# integration @ "Merge pull request #1 from getwyrd/agents-rubric", 2026-10-17:
-# upstream_base plus #557 (error variants), #551 (failpoint lock residue), #558 (TSO
-# deadline) and the fork-only AGENTS.md rubric. Pin one commit and bump it by hand, as a
-# reviewed step: a bump re-states every ledger claim. (Previous pin: 3408d95 on upstream
-# master, client-rust-test #57 — see README § History.)
-rev = "b10bc696225af8cec3cf8b6422c64bb3fe21f4b7"
+# integration @ "Merge pull request #3 from getwyrd/sync-upstream-1b883bf", 2026-10-20:
+# upstream_base plus #558 (TSO deadline, still open upstream) and the fork-only AGENTS.md
+# rubric. #557 (error variants) and #551 (failpoint lock residue) are in upstream_base
+# now. Pin one commit and bump it by hand, as a reviewed step: a bump re-states every
+# ledger claim. (Previous pin: b10bc69, client-rust-test #66 — see README § History.)
+rev = "18eff6d99ea8b9af5b9c6f5d3ae7bbbf44569a97"
 
-# master @ "fix(transaction): recover expired async commit locks (#561)", 2026-10-17.
+# master @ "chore: Add IDE components to pinned toolchain (#575)", 2026-10-19.
 # Where integration meets upstream master. integration is updated by merges only and is
 # never force-pushed (branch protection disables force-pushes; admins are not bound by
 # it, so this is also a rule we keep), so every past pin stays reachable. When it merges
 # a newer upstream master, move this in the same pin bump.
-upstream_base = "3408d958c894f199c336f4439c43a5ada7af967a"
+upstream_base = "1b883bf144a8557938f6069682c61b4d39cf6bf2"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The ORACLE.
