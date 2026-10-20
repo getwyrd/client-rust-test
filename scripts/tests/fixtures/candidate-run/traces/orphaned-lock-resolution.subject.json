@@ -10,10 +10,10 @@
       },
       "harness": {
         "base": "884c4652e4588a2bc3265ce9f464e9b90f63f8c6",
-        "digest": "882387605226a136eafdb40a2d8537fca6c737701053ee8ad9dad2866d8d8c35"
+        "digest": "d1a8ac0d5587f60d1deed410e2f605a204af5cb102d1fb88b632253b25d7d7e5"
       }
     },
-    "captured_at": "2026-10-20T13:07:15Z",
+    "captured_at": "2026-10-20T13:13:02Z",
     "client_go": {
       "matches_pin": true,
       "module": "github.com/tikv/client-go/v2",
@@ -42,8 +42,8 @@
       "verified": true
     },
     "harness": {
-      "dirty": false,
-      "rev": "f3f55791c1dc38baee311688735106c7f2717846"
+      "dirty": true,
+      "rev": "56cbe2873955c057e6d9c7ea023e1aa1573af8b8"
     },
     "mode": "candidate",
     "schema": "parity-provenance/v1",
@@ -60,22 +60,21 @@
   "roles": [
     {
       "role": "orphaner",
-      "driver": "go",
+      "driver": "rust",
       "hello": {
-        "driver": "go",
+        "driver": "rust",
         "protocol": "parity-cmd/v1",
         "client": {
-          "name": "github.com/tikv/client-go/v2",
-          "version": "v2.0.8-0.20261014135228-56e5933f0069",
+          "name": "tikv-client",
+          "version": "path:../client-rust (see results/provenance.json)",
           "replaced": false
         },
         "features": [
-          "prewrite_only",
           "scan_locks",
-          "raw_checksum"
+          "prewrite_only"
         ],
         "config": [
-          "pd.enable_router_client=false (PD v8.5.5 does not implement QueryRegion; falls back to the classic GetRegion RPC, which is the path client-rust uses)"
+          "drop_check=warn (stock default is panic)"
         ]
       }
     },
@@ -100,7 +99,7 @@
       }
     }
   ],
-  "prefix": "gate/orphaned-lock-resolution/1792501645478682745/",
+  "prefix": "gate/orphaned-lock-resolution/1792502012353337115/",
   "steps": [
     {
       "id": "orphaner-open",
@@ -116,7 +115,7 @@
       "op": "begin",
       "observation": {
         "class": "ok",
-        "start_ts": 469893551347728387
+        "start_ts": 469893647528361985
       }
     },
     {
@@ -133,7 +132,7 @@
       "op": "prewrite_only",
       "observation": {
         "class": "ok",
-        "start_ts": 469893551347728387
+        "start_ts": 469893647528361985
       }
     },
     {
@@ -161,16 +160,16 @@
         "locks": [
           {
             "key": {
-              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLXJlc29sdXRpb24vMTc5MjUwMTY0NTQ3ODY4Mjc0NS96LXNlY29uZGFyeQ==",
-              "utf8": "gate/orphaned-lock-resolution/1792501645478682745/z-secondary"
+              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLXJlc29sdXRpb24vMTc5MjUwMjAxMjM1MzMzNzExNS96LXNlY29uZGFyeQ==",
+              "utf8": "gate/orphaned-lock-resolution/1792502012353337115/z-secondary"
             },
             "primary": {
-              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLXJlc29sdXRpb24vMTc5MjUwMTY0NTQ3ODY4Mjc0NS9hLXByaW1hcnk=",
-              "utf8": "gate/orphaned-lock-resolution/1792501645478682745/a-primary"
+              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLXJlc29sdXRpb24vMTc5MjUwMjAxMjM1MzMzNzExNS9hLXByaW1hcnk=",
+              "utf8": "gate/orphaned-lock-resolution/1792502012353337115/a-primary"
             },
             "kind": "put",
             "ttl_ms": 1000,
-            "txn_start_ts": 469893551347728387
+            "txn_start_ts": 469893647528361985
           }
         ]
       }

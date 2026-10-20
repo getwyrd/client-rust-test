@@ -1,6 +1,6 @@
 {
   "schema": "parity-provenance/v1",
-  "captured_at": "2026-10-20T13:07:15Z",
+  "captured_at": "2026-10-20T13:13:02Z",
   "strict": false,
   "mode": "candidate",
   "client_rust": {
@@ -38,9 +38,9 @@
     "pinned_go": "1.25.14",
     "go_matches_pin": true
   },
-  "harness": { "rev": "f3f55791c1dc38baee311688735106c7f2717846", "dirty": false },
+  "harness": { "rev": "56cbe2873955c057e6d9c7ea023e1aa1573af8b8", "dirty": true },
   "candidate": {
     "client_rust": { "contains_pin": true, "digest": "d7cfd4ee9278b4b070b332bed91c5ec1ab082d07f636d90384470f9651b8833c" },
-    "harness": { "base": "884c4652e4588a2bc3265ce9f464e9b90f63f8c6", "digest": "882387605226a136eafdb40a2d8537fca6c737701053ee8ad9dad2866d8d8c35" }
+    "harness": { "base": "884c4652e4588a2bc3265ce9f464e9b90f63f8c6", "digest": "d1a8ac0d5587f60d1deed410e2f605a204af5cb102d1fb88b632253b25d7d7e5" }
   }
 }

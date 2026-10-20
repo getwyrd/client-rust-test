@@ -1,0 +1,63 @@
+{
+  "divergences": [],
+  "gap": "G-0003",
+  "oracle": "oracle",
+  "provenance": {
+    "candidate": {
+      "client_rust": {
+        "contains_pin": true,
+        "digest": "d7cfd4ee9278b4b070b332bed91c5ec1ab082d07f636d90384470f9651b8833c"
+      },
+      "harness": {
+        "base": "884c4652e4588a2bc3265ce9f464e9b90f63f8c6",
+        "digest": "d1a8ac0d5587f60d1deed410e2f605a204af5cb102d1fb88b632253b25d7d7e5"
+      }
+    },
+    "captured_at": "2026-10-20T13:13:02Z",
+    "client_go": {
+      "matches_pin": true,
+      "module": "github.com/tikv/client-go/v2",
+      "pinned_version": "v2.0.8-0.20261014135228-56e5933f0069",
+      "replaced": false,
+      "verified": true,
+      "version": "v2.0.8-0.20261014135228-56e5933f0069"
+    },
+    "client_rust": {
+      "branch": "HEAD",
+      "describe": "0.4.0-47-g4c9f361-dirty",
+      "dirty": true,
+      "matches_pin": false,
+      "path": "../client-rust",
+      "pinned_rev": "4c9f3615c2f3aac3f4aff8387d5bed40e1532876",
+      "rev": "4c9f3615c2f3aac3f4aff8387d5bed40e1532876"
+    },
+    "cluster": {
+      "matches_pin": true,
+      "observed_pd_version": "v8.5.5",
+      "observed_tikv_versions": "8.5.5",
+      "pd_addr": "127.0.0.1:2379",
+      "pinned_pd_image": "pingcap/pd:v8.5.5@sha256:a043b91dc9a0ad8d1c2a2aa8b84ea3f28c2399f9245683cc83d1603b5ee1df9c",
+      "pinned_tikv_image": "pingcap/tikv:v8.5.5@sha256:1600c2de7432af1f7f23291dcac13b3f82950d4ef722b1f01c3e7b129af64b64",
+      "pinned_version": "v8.5.5",
+      "verified": true
+    },
+    "harness": {
+      "dirty": true,
+      "rev": "56cbe2873955c057e6d9c7ea023e1aa1573af8b8"
+    },
+    "mode": "candidate",
+    "schema": "parity-provenance/v1",
+    "strict": false,
+    "toolchain": {
+      "go": "1.25.14",
+      "go_matches_pin": true,
+      "pinned_go": "1.25.14",
+      "pinned_rust": "1.93.0",
+      "rust": "rustc 1.93.0 (254b59607 2026-01-19)",
+      "rust_matches_pin": true
+    }
+  },
+  "scenario": "orphaned-lock-interop",
+  "schema": "parity-divergence/v1",
+  "subject": "subject"
+}
