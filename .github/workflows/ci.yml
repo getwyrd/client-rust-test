@@ -222,12 +222,19 @@ jobs:
       - name: build the drivers (without the test probe)
         run: make drivers DRIVER_FEATURES=
       # G-0001's subject run builds its orphan with client-rust's probe, which
-      # upstream_base lacks, so here it is inadmissible and this step fails until upstream
-      # has the probe (tikv/client-rust#577). It fails closed on purpose: every attempt to
-      # tolerate just that failure could also hide a real one. The job is not a required
-      # check, and the artifact below is uploaded either way.
+      # upstream_base lacks, so here it is inadmissible until upstream has the probe
+      # (tikv/client-rust#577). This view is never ledger evidence, so a failing diff is
+      # a WARNING, not a red job: the step may fail, the next step says so, and the full
+      # output is in the log and the artifact. No attempt is made to tell that expected
+      # failure from others; read the warning. The driver build and driver tests above
+      # still fail the job.
       - name: parity diff at upstream_base (informational)
+        id: upstream_parity
+        continue-on-error: true
         run: make parity DRIVER_FEATURES=
+      - name: warn if the upstream diff failed
+        if: steps.upstream_parity.outcome == 'failure'
+        run: echo "::warning title=upstream view::the parity diff at upstream_base failed. Expected while upstream lacks the test probe (G-0001's Rust run is inadmissible); check the log for anything else."
       - name: upstream view
         if: always()
         uses: actions/upload-artifact@v4
