@@ -238,15 +238,19 @@ fixed in client-rust.
 1. **Bug (regression in #519) — an orphaned lock is never resolved; filed as #543 — FIXED upstream by #561** (our #544 closed as superseded)
    (`d6`, **red** on `e53837d`, green since `3408d95`; ledger **`G-0001`**, now FIXED and asserted to agree;
    [findings/](findings/txn-not-found-lock-resolution.md)). **Now also stated against
-   the oracle**: `scenarios/orphaned-lock-resolution.json` manufactures one orphan with
-   client-go's `CommitterProbe` and hands it to *each* client to resolve. client-go's
-   read succeeds and its resolver clears the lock (0 remaining); at `e53837d`
-   client-rust's read failed with `MultipleKeyErrors` and the lock stayed (1 remaining),
-   and since `3408d95` the two agree. Because
-   both runs share one setup, the divergence is attributable to the **reader alone** —
-   which `d6` cannot claim, since it must manufacture the orphan through the public API
-   with a region split and a racing txn, and so cannot tell *"I failed to build the
-   orphan"* apart from *"the client failed to resolve it"*. Verified both ways at
+   the oracle**, in two entries. Until WP-07, `scenarios/orphaned-lock-resolution.json`
+   manufactured one orphan with client-go's `CommitterProbe` and handed it to *each*
+   client to resolve. client-go's read succeeds and its resolver clears the lock
+   (0 remaining); at `e53837d` client-rust's read failed with `MultipleKeyErrors` and the
+   lock stayed (1 remaining), and since `3408d95` the two agree. Because both runs shared
+   one setup, the divergence was attributable to the **reader alone**; that mixed case is
+   now **G-0003** (`scenarios/orphaned-lock-interop.json`). Since client-rust's test probe
+   (WP-07), **G-0001** is all-Go against all-Rust: each client builds its own orphan with
+   its own probe and reads it, and the `reader-confirms-orphan` assert (exactly one lock)
+   checks that each run's setup held. Either way the harness can say what `d6` cannot:
+   `d6` must manufacture the orphan through the public API with a region split and a
+   racing txn, and so cannot tell *"I failed to build the orphan"* apart from *"the
+   client failed to resolve it"*. Verified both ways at
    `e53837d`: applying [the fix](findings/fix-check-txn-status-wrapper.patch) made the
    divergence vanish entirely, and `ledger-check` then failed with **XCONVERGE**, as it had
    to while G-0001 was declared `diverges` (it is now `agrees`, and that outcome HOLDS). A lock on a
