@@ -17,9 +17,9 @@ loop's view of this harness (candidate provenance, the cluster broker, ORACLE-WR
 | # | Title | Decided | Status |
 |---|-------|---------|--------|
 | [0001](0001-pin-follows-the-integration-branch.md) | The client-rust pin follows the fork's `integration` branch | 20.10.2026 | Accepted |
-| [0002](0002-parity-is-one-directional.md) | Parity is one-directional: Rust ⊇ Go | — | Proposed |
-| [0003](0003-never-emulate-a-missing-feature.md) | Never emulate a missing feature | — | Proposed |
-| [0004](0004-the-runner-links-neither-client.md) | The runner links neither client | — | Proposed |
-| [0005](0005-no-workarounds-in-the-harness.md) | The harness carries no workarounds for client bugs | — | Proposed |
-| [0006](0006-tikv-v8-5-5-is-the-ci-floor.md) | TiKV v8.5.5 is the CI floor | — | Proposed |
-| [0007](0007-client-go-is-pinned-by-module.md) | client-go is pinned by module, never replaced | — | Proposed |
+| [0002](0002-parity-is-one-directional.md) | Parity is one-directional: Rust ⊇ Go | 20.10.2026 | Accepted |
+| [0003](0003-never-emulate-a-missing-feature.md) | Never emulate a missing feature | 20.10.2026 | Accepted |
+| [0004](0004-the-runner-links-neither-client.md) | The runner links neither client | 20.10.2026 | Accepted |
+| [0005](0005-no-workarounds-in-the-harness.md) | The harness carries no workarounds for client bugs | 20.10.2026 | Accepted |
+| [0006](0006-tikv-v8-5-5-is-the-ci-floor.md) | TiKV v8.5.5 is the CI floor | 20.10.2026 | Accepted |
+| [0007](0007-client-go-is-pinned-by-module.md) | client-go is pinned by module, never replaced | 20.10.2026 | Accepted |
