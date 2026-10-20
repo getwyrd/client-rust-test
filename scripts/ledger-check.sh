@@ -414,6 +414,14 @@ for gap in ledger.get("gap", []):
         if i == 0 and not go_bindings:
             refuse(f"{gap['id']}: {f} is the oracle run and has no `go` role, so nothing "
                    "attests which client-go ran.")
+        # The trace must report a Go hello for exactly the roles the scenario binds to go
+        # in this run: a trace with its roles dropped must not pass as an all-Rust run.
+        bind = next((r["bind"] for r in scen["runs"] if r["name"] == run), {})
+        want_go = {role for role, driver in bind.items() if driver == "go"}
+        got_go = {rb["role"] for rb in go_bindings}
+        if got_go != want_go:
+            refuse(f"{gap['id']}: {f} reports go roles {sorted(got_go)}, but the scenario "
+                   f"binds {sorted(want_go)} to go in run `{run}`.")
 
         for rb in go_bindings:
             c = rb["hello"]["client"]

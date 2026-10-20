@@ -137,6 +137,16 @@ class LedgerCheckCandidate(Scratch):
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("is the oracle run and has no `go` role", r.stderr)
 
+    def test_a_trace_must_report_every_go_role_its_scenario_binds(self):
+        # G-0003's subject run binds the orphaner to go; dropping it from the trace must
+        # not make the run pass as all-Rust.
+        def drop_go(t):
+            t["roles"] = [rb for rb in t["roles"] if rb["driver"] != "go"]
+        self.edit_trace("orphaned-lock-interop", "subject", drop_go)
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("but the scenario binds ['orphaner'] to go", r.stderr)
+
     def test_a_go_binding_in_the_subject_run_is_still_checked(self):
         def wrong_go(t):
             for rb in t["roles"]:
