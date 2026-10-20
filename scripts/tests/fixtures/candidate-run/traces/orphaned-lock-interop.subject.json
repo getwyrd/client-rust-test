@@ -1,0 +1,195 @@
+{
+  "schema": "parity-trace/v1",
+  "scenario": "orphaned-lock-interop",
+  "run": "subject",
+  "provenance": {
+    "candidate": {
+      "client_rust": {
+        "contains_pin": true,
+        "digest": "d7cfd4ee9278b4b070b332bed91c5ec1ab082d07f636d90384470f9651b8833c"
+      },
+      "harness": {
+        "base": "884c4652e4588a2bc3265ce9f464e9b90f63f8c6",
+        "digest": "d1a8ac0d5587f60d1deed410e2f605a204af5cb102d1fb88b632253b25d7d7e5"
+      }
+    },
+    "captured_at": "2026-10-20T13:13:02Z",
+    "client_go": {
+      "matches_pin": true,
+      "module": "github.com/tikv/client-go/v2",
+      "pinned_version": "v2.0.8-0.20261014135228-56e5933f0069",
+      "replaced": false,
+      "verified": true,
+      "version": "v2.0.8-0.20261014135228-56e5933f0069"
+    },
+    "client_rust": {
+      "branch": "HEAD",
+      "describe": "0.4.0-47-g4c9f361-dirty",
+      "dirty": true,
+      "matches_pin": false,
+      "path": "../client-rust",
+      "pinned_rev": "4c9f3615c2f3aac3f4aff8387d5bed40e1532876",
+      "rev": "4c9f3615c2f3aac3f4aff8387d5bed40e1532876"
+    },
+    "cluster": {
+      "matches_pin": true,
+      "observed_pd_version": "v8.5.5",
+      "observed_tikv_versions": "8.5.5",
+      "pd_addr": "127.0.0.1:2379",
+      "pinned_pd_image": "pingcap/pd:v8.5.5@sha256:a043b91dc9a0ad8d1c2a2aa8b84ea3f28c2399f9245683cc83d1603b5ee1df9c",
+      "pinned_tikv_image": "pingcap/tikv:v8.5.5@sha256:1600c2de7432af1f7f23291dcac13b3f82950d4ef722b1f01c3e7b129af64b64",
+      "pinned_version": "v8.5.5",
+      "verified": true
+    },
+    "harness": {
+      "dirty": true,
+      "rev": "56cbe2873955c057e6d9c7ea023e1aa1573af8b8"
+    },
+    "mode": "candidate",
+    "schema": "parity-provenance/v1",
+    "strict": false,
+    "toolchain": {
+      "go": "1.25.14",
+      "go_matches_pin": true,
+      "pinned_go": "1.25.14",
+      "pinned_rust": "1.93.0",
+      "rust": "rustc 1.93.0 (254b59607 2026-01-19)",
+      "rust_matches_pin": true
+    }
+  },
+  "roles": [
+    {
+      "role": "orphaner",
+      "driver": "go",
+      "hello": {
+        "driver": "go",
+        "protocol": "parity-cmd/v1",
+        "client": {
+          "name": "github.com/tikv/client-go/v2",
+          "version": "v2.0.8-0.20261014135228-56e5933f0069",
+          "replaced": false
+        },
+        "features": [
+          "prewrite_only",
+          "scan_locks",
+          "raw_checksum"
+        ],
+        "config": [
+          "pd.enable_router_client=false (PD v8.5.5 does not implement QueryRegion; falls back to the classic GetRegion RPC, which is the path client-rust uses)"
+        ]
+      }
+    },
+    {
+      "role": "reader",
+      "driver": "rust",
+      "hello": {
+        "driver": "rust",
+        "protocol": "parity-cmd/v1",
+        "client": {
+          "name": "tikv-client",
+          "version": "path:../client-rust (see results/provenance.json)",
+          "replaced": false
+        },
+        "features": [
+          "scan_locks",
+          "prewrite_only"
+        ],
+        "config": [
+          "drop_check=warn (stock default is panic)"
+        ]
+      }
+    }
+  ],
+  "prefix": "gate/orphaned-lock-interop/1792501992241895478/",
+  "steps": [
+    {
+      "id": "orphaner-open",
+      "role": "orphaner",
+      "op": "open_client",
+      "observation": {
+        "class": "ok"
+      }
+    },
+    {
+      "id": "orphaner-begin",
+      "role": "orphaner",
+      "op": "begin",
+      "observation": {
+        "class": "ok",
+        "start_ts": 469893642246160388
+      }
+    },
+    {
+      "id": "orphaner-stage",
+      "role": "orphaner",
+      "op": "put",
+      "observation": {
+        "class": "ok"
+      }
+    },
+    {
+      "id": "orphaner-prewrite",
+      "role": "orphaner",
+      "op": "prewrite_only",
+      "observation": {
+        "class": "ok",
+        "start_ts": 469893642246160388
+      }
+    },
+    {
+      "id": "orphaner-crash",
+      "role": "orphaner",
+      "op": "abandon",
+      "observation": {
+        "class": "ok"
+      }
+    },
+    {
+      "id": "reader-open",
+      "role": "reader",
+      "op": "open_client",
+      "observation": {
+        "class": "ok"
+      }
+    },
+    {
+      "id": "reader-confirms-orphan",
+      "role": "reader",
+      "op": "scan_locks",
+      "observation": {
+        "class": "ok",
+        "locks": [
+          {
+            "key": {
+              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLWludGVyb3AvMTc5MjUwMTk5MjI0MTg5NTQ3OC96LXNlY29uZGFyeQ==",
+              "utf8": "gate/orphaned-lock-interop/1792501992241895478/z-secondary"
+            },
+            "primary": {
+              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLWludGVyb3AvMTc5MjUwMTk5MjI0MTg5NTQ3OC9hLXByaW1hcnk=",
+              "utf8": "gate/orphaned-lock-interop/1792501992241895478/a-primary"
+            },
+            "kind": "put",
+            "ttl_ms": 1000,
+            "txn_start_ts": 469893642246160388
+          }
+        ]
+      }
+    },
+    {
+      "id": "reader-final-read",
+      "role": "reader",
+      "op": "snapshot_get",
+      "observation": {
+        "class": "not_found"
+      }
+    },
+    {
+      "id": "reader-locks-after",
+      "role": "reader",
+      "op": "scan_locks",
+      "observation": {
+        "class": "ok"
+      }
+    }
+  ]
+}
