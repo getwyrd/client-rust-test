@@ -225,7 +225,19 @@ jobs:
       - name: build the drivers (without the test probe)
         run: make drivers DRIVER_FEATURES=
       - name: parity diff at upstream_base (informational)
-        run: make parity DRIVER_FEATURES= || echo "::warning::upstream view: some runs are inadmissible at upstream_base (see the upstream-view artifact)"
+        shell: bash
+        run: |
+          set -o pipefail
+          if make parity DRIVER_FEATURES= 2>&1 | tee parity.log; then exit 0; fi
+          # Only a run that needs the probe on the Rust side may fail here, and only by
+          # being inadmissible; any other failure fails the step.
+          expected='^INADMISSIBLE: scenario `orphaned-lock-resolution` run `subject`'
+          if grep -q "$expected" parity.log && [ "$(grep -c '^INADMISSIBLE:' parity.log)" = 1 ] \
+             && ! grep -qE '^(error|REFUSING)' parity.log; then
+            echo "::warning::upstream view: G-0001's Rust run needs the test probe, which upstream_base lacks"
+            exit 0
+          fi
+          exit 1
       - name: upstream view
         if: always()
         uses: actions/upload-artifact@v4
