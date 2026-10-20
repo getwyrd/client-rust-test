@@ -6,14 +6,14 @@
     "candidate": {
       "client_rust": {
         "contains_pin": true,
-        "digest": "ac984d3d1420bb8fbb1bb4db1b3c93aad076ed30b3ee0b9ea6ed573b5ba245da"
+        "digest": "d7cfd4ee9278b4b070b332bed91c5ec1ab082d07f636d90384470f9651b8833c"
       },
       "harness": {
-        "base": "259344268131bfe489fb789fa22c8fc2d5dfcf25",
-        "digest": "1bb345bfb54cfb2c12f2192d43a0c12f2c96f4aae84293160cb66b7750a81cdc"
+        "base": "884c4652e4588a2bc3265ce9f464e9b90f63f8c6",
+        "digest": "882387605226a136eafdb40a2d8537fca6c737701053ee8ad9dad2866d8d8c35"
       }
     },
-    "captured_at": "2026-10-20T10:52:46Z",
+    "captured_at": "2026-10-20T13:07:15Z",
     "client_go": {
       "matches_pin": true,
       "module": "github.com/tikv/client-go/v2",
@@ -24,12 +24,12 @@
     },
     "client_rust": {
       "branch": "HEAD",
-      "describe": "0.4.0-45-g18eff6d-dirty",
+      "describe": "0.4.0-47-g4c9f361-dirty",
       "dirty": true,
       "matches_pin": false,
       "path": "../client-rust",
-      "pinned_rev": "18eff6d99ea8b9af5b9c6f5d3ae7bbbf44569a97",
-      "rev": "18eff6d99ea8b9af5b9c6f5d3ae7bbbf44569a97"
+      "pinned_rev": "4c9f3615c2f3aac3f4aff8387d5bed40e1532876",
+      "rev": "4c9f3615c2f3aac3f4aff8387d5bed40e1532876"
     },
     "cluster": {
       "matches_pin": true,
@@ -42,8 +42,8 @@
       "verified": true
     },
     "harness": {
-      "dirty": true,
-      "rev": "112567dce7058bc01132861502eaad6c9cca6666"
+      "dirty": false,
+      "rev": "f3f55791c1dc38baee311688735106c7f2717846"
     },
     "mode": "candidate",
     "schema": "parity-provenance/v1",
@@ -101,7 +101,7 @@
       }
     }
   ],
-  "prefix": "gate/orphaned-lock-resolution/1792493566197305280/",
+  "prefix": "gate/orphaned-lock-resolution/1792501635405362192/",
   "steps": [
     {
       "id": "orphaner-open",
@@ -117,7 +117,7 @@
       "op": "begin",
       "observation": {
         "class": "ok",
-        "start_ts": 469891433421078530
+        "start_ts": 469893548713181186
       }
     },
     {
@@ -134,7 +134,7 @@
       "op": "prewrite_only",
       "observation": {
         "class": "ok",
-        "start_ts": 469891433421078530
+        "start_ts": 469893548713181186
       }
     },
     {
@@ -162,16 +162,16 @@
         "locks": [
           {
             "key": {
-              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLXJlc29sdXRpb24vMTc5MjQ5MzU2NjE5NzMwNTI4MC96LXNlY29uZGFyeQ==",
-              "utf8": "gate/orphaned-lock-resolution/1792493566197305280/z-secondary"
+              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLXJlc29sdXRpb24vMTc5MjUwMTYzNTQwNTM2MjE5Mi96LXNlY29uZGFyeQ==",
+              "utf8": "gate/orphaned-lock-resolution/1792501635405362192/z-secondary"
             },
             "primary": {
-              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLXJlc29sdXRpb24vMTc5MjQ5MzU2NjE5NzMwNTI4MC9hLXByaW1hcnk=",
-              "utf8": "gate/orphaned-lock-resolution/1792493566197305280/a-primary"
+              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLXJlc29sdXRpb24vMTc5MjUwMTYzNTQwNTM2MjE5Mi9hLXByaW1hcnk=",
+              "utf8": "gate/orphaned-lock-resolution/1792501635405362192/a-primary"
             },
             "kind": "put",
             "ttl_ms": 1000,
-            "txn_start_ts": 469891433421078530
+            "txn_start_ts": 469893548713181186
           }
         ]
       }
