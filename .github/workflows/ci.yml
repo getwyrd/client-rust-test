@@ -229,11 +229,17 @@ jobs:
         run: |
           set -o pipefail
           if make parity DRIVER_FEATURES= 2>&1 | tee parity.log; then exit 0; fi
-          # Only a run that needs the probe on the Rust side may fail here, and only by
-          # being inadmissible; any other failure fails the step.
-          expected='^INADMISSIBLE: scenario `orphaned-lock-resolution` run `subject`'
-          if grep -q "$expected" parity.log && [ "$(grep -c '^INADMISSIBLE:' parity.log)" = 1 ] \
-             && ! grep -qE '^(error|REFUSING)' parity.log; then
+          # The one failure tolerated here: the Rust driver, built without the probe that
+          # upstream_base lacks, could not build G-0001's orphan. Its hello must not list
+          # prewrite_only, the only inadmissible run must be G-0001's subject run with no
+          # orphan found, and nothing else may have gone wrong. Anything else fails.
+          features=$(echo '{"op":"hello"}' | target/debug/parity-driver-rust \
+            | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["hello"]["features"]))')
+          expected='^INADMISSIBLE: scenario `orphaned-lock-resolution` run `subject`: step `reader-confirms-orphan` precondition failed: expected 1 lock\(s\), observed 0'
+          if [[ " $features " != *" prewrite_only "* ]] \
+             && grep -qE "$expected" parity.log \
+             && [ "$(grep -c '^INADMISSIBLE:' parity.log)" = 1 ] \
+             && ! grep -qE '^(error|REFUSING|RUNNER ERROR)' parity.log; then
             echo "::warning::upstream view: G-0001's Rust run needs the test probe, which upstream_base lacks"
             exit 0
           fi
