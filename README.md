@@ -207,12 +207,14 @@ State lives in `$PARITY_BROKER_DIR` (default `~/.local/state/parity-broker`).
 > At `4c9f361` (the fork's `integration`, 2026-10-20: upstream `master` @ `1b883bf` plus
 > tikv/client-rust#558, the `test-utils` probe offered as tikv/client-rust#577, and the
 > fork's `AGENTS.md`) the gate is **all green**, `d6` and `d7` included, and the ledger
-> holds: G-0001 is FIXED and asserted to **agree**, G-0002 still diverges as declared. The
-> upstream view at `1b883bf` agrees with it; it builds the Rust driver without the probe,
-> which upstream lacks. Confirm the checkout with
-> `git -C ../client-rust describe --tags --always --dirty`. What changed since the
-> previous pin: `integration` gained the probe, and the Rust driver's `prewrite_only`
-> drives it (WP-07); no verdict and no ledger claim moved.
+> holds: G-0001 is FIXED and asserted to **agree**, now all-Go against all-Rust, with
+> client-rust's test probe building the orphan on the Rust side; G-0002 still diverges as
+> declared; G-0003, the mixed case (a client-go orphan read by client-rust), is FIXED and
+> agrees. The upstream view at `1b883bf` builds the Rust driver without the probe, which
+> upstream lacks, so there G-0001's Rust run is inadmissible; the rest agrees. Confirm the
+> checkout with `git -C ../client-rust describe --tags --always --dirty`. What changed
+> since the previous pin: `integration` gained the probe and the Rust driver's
+> `prewrite_only` drives it (WP-07); G-0001 moved to all-Rust and G-0003 is new.
 > Evidence: [`findings/gate-evidence-4c9f361.txt`](findings/gate-evidence-4c9f361.txt)
 > (full `make verdict` and `make ledger` output at this pin, and the upstream view).
 
