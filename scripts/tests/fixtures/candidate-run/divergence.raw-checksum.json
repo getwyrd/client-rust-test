@@ -19,14 +19,14 @@
     "candidate": {
       "client_rust": {
         "contains_pin": true,
-        "digest": "69a4fea51aa627017d68b335fedae6c7268e5c2a078c143f24d11210752923af"
+        "digest": "ac984d3d1420bb8fbb1bb4db1b3c93aad076ed30b3ee0b9ea6ed573b5ba245da"
       },
       "harness": {
-        "base": "d934ec8f23814063d581af82b6d59ad105dbe187",
-        "digest": "158f6b0fc56e995886c35536186d2cb02f0283d246ebd9f88e059bc6d5385ba1"
+        "base": "259344268131bfe489fb789fa22c8fc2d5dfcf25",
+        "digest": "1bb345bfb54cfb2c12f2192d43a0c12f2c96f4aae84293160cb66b7750a81cdc"
       }
     },
-    "captured_at": "2026-10-18T23:58:07Z",
+    "captured_at": "2026-10-20T10:52:46Z",
     "client_go": {
       "matches_pin": true,
       "module": "github.com/tikv/client-go/v2",
@@ -37,18 +37,18 @@
     },
     "client_rust": {
       "branch": "HEAD",
-      "describe": "0.4.0-38-gb10bc69-dirty",
+      "describe": "0.4.0-45-g18eff6d-dirty",
       "dirty": true,
       "matches_pin": false,
       "path": "../client-rust",
-      "pinned_rev": "b10bc696225af8cec3cf8b6422c64bb3fe21f4b7",
-      "rev": "b10bc696225af8cec3cf8b6422c64bb3fe21f4b7"
+      "pinned_rev": "18eff6d99ea8b9af5b9c6f5d3ae7bbbf44569a97",
+      "rev": "18eff6d99ea8b9af5b9c6f5d3ae7bbbf44569a97"
     },
     "cluster": {
       "matches_pin": true,
       "observed_pd_version": "v8.5.5",
       "observed_tikv_versions": "8.5.5",
-      "pd_addr": "127.0.0.1:32000",
+      "pd_addr": "127.0.0.1:2379",
       "pinned_pd_image": "pingcap/pd:v8.5.5@sha256:a043b91dc9a0ad8d1c2a2aa8b84ea3f28c2399f9245683cc83d1603b5ee1df9c",
       "pinned_tikv_image": "pingcap/tikv:v8.5.5@sha256:1600c2de7432af1f7f23291dcac13b3f82950d4ef722b1f01c3e7b129af64b64",
       "pinned_version": "v8.5.5",
@@ -56,7 +56,7 @@
     },
     "harness": {
       "dirty": true,
-      "rev": "3082469bbbaeb07be3f4d3152a7b20c5ea99508e"
+      "rev": "112567dce7058bc01132861502eaad6c9cca6666"
     },
     "mode": "candidate",
     "schema": "parity-provenance/v1",
