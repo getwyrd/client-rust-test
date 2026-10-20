@@ -15,7 +15,8 @@
 # The upstream view is the same diff at upstream_base, run as CI's informational
 # `upstream-view` job runs it: PARITY_STRICT=0 and DRIVER_FEATURES= (no test probe, which
 # upstream_base lacks). G-0001's subject run cannot build its orphan there, so it is
-# INADMISSIBLE and the view exits 2; CI reports that as a warning. It is not ledger
+# INADMISSIBLE and the view exits 2; CI's upstream-view step fails on it until upstream has
+# the probe (it fails closed, and is not a required check). It is not ledger
 # evidence, and its provenance banner says ADVISORY RUN because the crate is not at the pin.
 #
 # An earlier capture at this pin, harness 0c66bc2 (#81, before G-0001 moved to all-Rust),
@@ -24,7 +25,8 @@
 # subject run has none of; b7c1d6b narrows that to the oracle run, and 13ecbb1 also requires
 # each trace's Go roles to be exactly those its scenario binds to go. Captures at b7c1d6b
 # and 13ecbb1 were green with the same ledger result; 086de46 adds a deadline to the Rust
-# driver's prewrite_only and fixes the upstream-view CI step, and is re-captured for that. The harness commit above is the one this run used;
+# driver's prewrite_only and fixes the upstream-view CI step, and is re-captured for that.
+# Later commits on this branch change only .github/workflows/ci.yml and this file. The harness commit above is the one this run used;
 # the commit that writes this file changes nothing but this file.
 
 ## make pins-check
