@@ -214,13 +214,8 @@ jobs:
           cache-dependency-path: client-rust-test/go/go.sum
       - name: cluster up
         run: make cluster-up
-      # upstream_base lacks #557, so the Rust driver builds with its pre-557 arms, and
-      # this is the only job that compiles and tests them. Once upstream_base includes
-      # #557 this build fails: drop the feature then.
-      - name: driver unit tests (pre-557)
-        run: cargo test -p rust-driver --features rust-driver/pre-557
       - name: parity diff at upstream_base (informational)
-        run: make parity DRIVER_FEATURES=--features=rust-driver/pre-557
+        run: make parity
       - name: upstream view
         if: always()
         uses: actions/upload-artifact@v4

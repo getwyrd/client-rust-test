@@ -107,12 +107,8 @@ failpoint-test: provenance
 # The drivers. Each links ONE client and speaks the parity command protocol; the
 # runner links NEITHER, so the thing deciding a verdict cannot reach for the crate
 # it is adjudicating.
-#
-# DRIVER_FEATURES=--features=rust-driver/pre-557 builds the Rust driver against a
-# client-rust without #557 — CI's informational run at pins.toml upstream_base (ADR-0001).
-DRIVER_FEATURES ?=
 drivers:
-	cargo build -p rust-driver -p parity-runner $(DRIVER_FEATURES)
+	cargo build -p rust-driver -p parity-runner
 	cd go && $(GO) build -o ../target/parity-driver-go ./driver
 
 # Run every scenario against both clients and REPORT the diff. Deliberately does not
