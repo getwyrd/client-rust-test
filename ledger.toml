@@ -70,6 +70,10 @@ the key error as `Error::MultipleKeyErrors` — so the `rollback_if_not_exist` e
 `get_txn_status_from_lock` was DEAD CODE. Fixed by tikv/client-rust#561, which matches both
 variants; at 3408d95 the reader resolves the orphan and reads `not_found`, as client-go does. Introduced by 7d80f59 (#519); the pre-#519
 resolver recovered this state via the legacy Cleanup path.
+
+Since client-rust's test probe (getwyrd/client-rust `test-probes`), each run builds its own
+orphan with its own client: all-Go against all-Rust. The mixed case, a Go orphan read by
+Rust, which this entry held until then, is G-0003.
 """
 
 scenario = "scenarios/orphaned-lock-resolution.json"
@@ -153,3 +157,29 @@ step    = "checker-checksum"
 path    = "unsupported.detail"
 oracle  = "<step absent>"
 subject = "client-rust has no raw checksum: tikv-client implements no RawChecksum request. client-go's rawkv.Checksum returns crc64_xor/total_kvs/total_bytes computed server-side. The driver does NOT emulate it: the gap is the finding (G-0002)."
+
+[[gap]]
+id     = "G-0003"
+slug   = "orphaned-lock-interop"
+kind   = "behavioral"
+area   = "txn.lock-resolution"
+status = "FIXED"
+
+title = "An orphaned lock left by client-go must be resolvable by a client-rust reader"
+
+expectation = """
+The cross-client form of G-0001: a client-go transaction prewrites a secondary under a
+primary it never writes and crashes; a client-rust reader must resolve the orphan once
+its TTL expires and read `not_found`, as a client-go reader does. Lock records are
+TiKV's, not the client's, so the two clients must interoperate on them.
+
+This was G-0001's own subject run until the Rust driver could build the orphan itself;
+the same fix (tikv/client-rust#561) closed it.
+"""
+
+scenario = "scenarios/orphaned-lock-interop.json"
+expect   = "agrees"
+
+upstream_issue = "https://github.com/tikv/client-rust/issues/543"
+upstream_pr    = "https://github.com/tikv/client-rust/pull/561"
+finding        = "findings/txn-not-found-lock-resolution.md"
