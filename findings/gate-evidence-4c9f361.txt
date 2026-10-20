@@ -1,6 +1,6 @@
 # Gate + ledger evidence at the client-rust pin 4c9f361 (getwyrd integration; upstream_base 1b883bf)
-# Captured 2026-10-20T13:18:19Z on a leased single-node TiKV/PD v8.5.5 cluster, PARITY_STRICT=1.
-# harness: 13ecbb1   client-rust: 0.4.0-47-g4c9f361   client-go: 56e5933
+# Captured 2026-10-20T13:27:38Z on a leased single-node TiKV/PD v8.5.5 cluster, PARITY_STRICT=1.
+# harness: 086de46   client-rust: 0.4.0-47-g4c9f361   client-go: 56e5933
 # Lines starting with `#` are commentary, written with the file. Every other line is the
 # capture script's output, verbatim except for two filters: in `## make verdict`, indented
 # cargo progress lines (Compiling, Checking, Finished, Running, Downloaded, Downloading,
@@ -22,8 +22,9 @@
 # was green with G-0001 and G-0002 holding. A capture at 56cbe28 on this branch refused to
 # settle: ledger-check then required a Go binding in every compared run, which an all-Rust
 # subject run has none of; b7c1d6b narrows that to the oracle run, and 13ecbb1 also requires
-# each trace's Go roles to be exactly those its scenario binds to go. A capture at b7c1d6b
-# was green with the same ledger result. The harness commit above is the one this run used;
+# each trace's Go roles to be exactly those its scenario binds to go. Captures at b7c1d6b
+# and 13ecbb1 were green with the same ledger result; 086de46 adds a deadline to the Rust
+# driver's prewrite_only and fixes the upstream-view CI step, and is re-captured for that. The harness commit above is the one this run used;
 # the commit that writes this file changes nothing but this file.
 
 ## make pins-check
@@ -51,33 +52,33 @@ provenance -> results/provenance.json
 ═══ gate: the tests expected to pass ═══
 
 running 18 tests
-test b1_create_is_all_or_nothing ... ok
 test d1_write_conflict_error_shape_is_key_error_with_conflict ... ok
+test b1_create_is_all_or_nothing ... ok
 test b3_file_commit_is_a_version_cas ... ok
-test d4_adjacent_prefixes_do_not_bleed ... ok
 test c2_require_absent_exactly_one_creator_optimistic_locked ... ok
-test b2_rename_is_atomic_delete_plus_put ... ok
+test d4_adjacent_prefixes_do_not_bleed ... ok
 test a1_roundtrip_through_object_safe_trait ... ok
-test d2_get_for_update_reads_latest_committed_value ... ok
+test b2_rename_is_atomic_delete_plus_put ... ok
 test a2_values_round_trip_byte_identically ... ok
+test d2_get_for_update_reads_latest_committed_value ... ok
 test a3_conflict_is_ok_and_leaves_no_side_effects ... ok
 test c2_require_absent_exactly_one_creator_pessimistic ... ok
 test c1_version_cas_exactly_one_winner_optimistic_locked ... ok
 test c1_version_cas_exactly_one_winner_pessimistic ... ok
-[2026-10-20T13:18:23Z ERROR tikv_client::request::plan] single_plan_handler: failed to join task (1 tasks): task 4715 was cancelled
+[2026-10-20T13:27:42Z ERROR tikv_client::request::plan] single_plan_handler: failed to join task (1 tasks): task 4898 was cancelled
 test d5_woken_lock_waiter_surfaces_a_classifiable_write_conflict ... ok
-test c3_write_skew_anomaly_and_the_lock_that_prevents_it ... ok
 test d3_scan_pages_beyond_one_batch ... ok
+test c3_write_skew_anomaly_and_the_lock_that_prevents_it ... ok
 test p0_cluster_can_split_regions ... ok
 test d6_orphaned_lock_must_be_resolved_by_client_rust ... ok
 
 successes:
 
 ---- d1_write_conflict_error_shape_is_key_error_with_conflict stdout ----
-observed write-conflict error shape: MultipleKeyErrors([KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469893723732312182), conflict_start_ts: TimeStamp(469893723732312171), conflict_commit_ts: TimeStamp(469893723732312228), key: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], reason: Optimistic })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469893723732312182, conflict_ts: 469893723732312171, key: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], conflict_commit_ts: 469893723732312228, reason: Optimistic }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None, txn_lock_not_found: None, debug_info: None })])
+observed write-conflict error shape: MultipleKeyErrors([KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469893870331887692), conflict_start_ts: TimeStamp(469893870331887687), conflict_commit_ts: TimeStamp(469893870331887718), key: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], reason: Optimistic })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469893870331887692, conflict_ts: 469893870331887687, key: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], conflict_commit_ts: 469893870331887718, reason: Optimistic }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None, txn_lock_not_found: None, debug_info: None })])
 
 ---- d5_woken_lock_waiter_surfaces_a_classifiable_write_conflict stdout ----
-observed wake-up error shape: PessimisticLockError { inner: MultipleKeyErrors([KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469893723732312283), conflict_start_ts: TimeStamp(469893723732312251), conflict_commit_ts: TimeStamp(469893723810693164), key: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], reason: PessimisticRetry })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469893723732312283, conflict_ts: 469893723732312251, key: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], conflict_commit_ts: 469893723810693164, reason: PessimisticRetry }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None, txn_lock_not_found: None, debug_info: None })]), success_keys: [] }
+observed wake-up error shape: PessimisticLockError { inner: MultipleKeyErrors([KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469893870331887772), conflict_start_ts: TimeStamp(469893870331887738), conflict_commit_ts: TimeStamp(469893870410268755), key: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], reason: PessimisticRetry })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469893870331887772, conflict_ts: 469893870331887738, key: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], conflict_commit_ts: 469893870410268755, reason: PessimisticRetry }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None, txn_lock_not_found: None, debug_info: None })]), success_keys: [] }
 
 ---- c3_write_skew_anomaly_and_the_lock_that_prevents_it stdout ----
 observed wake-up behavior for the blocked mutator: Conflict
@@ -87,8 +88,8 @@ cluster splits regions: 5 -> 132 regions (0 re-writes), stores Up [1]
 
 ---- d6_orphaned_lock_must_be_resolved_by_client_rust stdout ----
 cross-region precondition met after 1 split request(s): 12 != 4
-orphan confirmed: lock on "gate/d6/1792502303060292705/z-secondary", primary "gate/d6/1792502303060292705/a-primary", ttl 3006ms
-within-TTL read (may fail on any client): TxnNotFound(TxnNotFound { start_ts: 469893723876229149, primary_key: [103, 97, 116, 101, 47, 100, 54, 47, 49, 55, 57, 50, 53, 48, 50, 51, 48, 51, 48, 54, 48, 50, 57, 50, 55, 48, 53, 47, 97, 45, 112, 114, 105, 109, 97, 114, 121] })
+orphan confirmed: lock on "gate/d6/1792502862303960283/z-secondary", primary "gate/d6/1792502862303960283/a-primary", ttl 3007ms
+within-TTL read (may fail on any client): TxnNotFound(TxnNotFound { start_ts: 469893870476066820, primary_key: [103, 97, 116, 101, 47, 100, 54, 47, 49, 55, 57, 50, 53, 48, 50, 56, 54, 50, 51, 48, 51, 57, 54, 48, 50, 56, 51, 47, 97, 45, 112, 114, 105, 109, 97, 114, 121] })
 orphaned lock resolved by client-rust after TTL — key readable
 
 
@@ -112,7 +113,7 @@ successes:
     d6_orphaned_lock_must_be_resolved_by_client_rust
     p0_cluster_can_split_regions
 
-test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.18s
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.21s
 
 OK: gate is green apart from its expected-red tests.
 
