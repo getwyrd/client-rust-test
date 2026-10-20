@@ -214,8 +214,18 @@ jobs:
           cache-dependency-path: client-rust-test/go/go.sum
       - name: cluster up
         run: make cluster-up
+      # upstream_base lacks client-rust's test probe, so the Rust driver builds without
+      # it and answers `unsupported` to prewrite_only, and a scenario whose Rust side
+      # builds its state with the probe (G-0001) is inadmissible here. The build and the
+      # driver tests must pass; the diff reports an inadmissible run as a warning, since
+      # this view is never ledger evidence. Once upstream_base has the probe, drop
+      # DRIVER_FEATURES= and the `||` below, and the switch in rust-driver/src/probe.rs.
+      - name: driver unit tests (without the test probe)
+        run: cargo test -p rust-driver
+      - name: build the drivers (without the test probe)
+        run: make drivers DRIVER_FEATURES=
       - name: parity diff at upstream_base (informational)
-        run: make parity
+        run: make parity DRIVER_FEATURES= || echo "::warning::upstream view: some runs are inadmissible at upstream_base (see the upstream-view artifact)"
       - name: upstream view
         if: always()
         uses: actions/upload-artifact@v4

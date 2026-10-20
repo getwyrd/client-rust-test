@@ -16,6 +16,7 @@
 
 mod exec;
 mod mapping;
+mod probe;
 
 use std::io::BufRead;
 use std::io::Write;
