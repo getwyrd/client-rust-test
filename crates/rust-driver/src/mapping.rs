@@ -55,10 +55,7 @@ pub fn classify(err: &Error) -> Observation {
 fn error_count(err: &Error) -> Option<usize> {
     match err {
         Error::MultipleKeyErrors(errs) => Some(errs.len()),
-        #[cfg(not(feature = "pre-557"))]
         Error::MultipleRegionErrors(errs) => Some(errs.len()),
-        #[cfg(feature = "pre-557")]
-        Error::ExtractedErrors(errs) => Some(errs.len()),
         Error::PessimisticLockError { inner, .. } => error_count(inner),
         _ => None,
     }
@@ -84,10 +81,7 @@ fn classify_inner(err: &Error) -> (Class, Option<serde_json::Value>) {
         // `MultipleRegionErrors`, whose members are all region errors. Every one of
         // them is classified by its members, and `native.type` keeps the variant.
         Error::MultipleKeyErrors(errs) => classify_multi(errs),
-        #[cfg(not(feature = "pre-557"))]
         Error::MultipleRegionErrors(errs) => classify_multi(errs),
-        #[cfg(feature = "pre-557")]
-        Error::ExtractedErrors(errs) => classify_multi(errs),
 
         // The pessimistic-lock wrapper. The inner error is the fact; unwrap it, or a
         // write conflict surfaced through a lock request would be unclassifiable —
@@ -312,9 +306,6 @@ fn variant_name(err: &Error) -> &'static str {
         Error::KeyError(_) => "KeyError",
         // Finding 1 turned on MultipleKeyErrors vs ExtractedErrors: same class,
         // different name — and the name was the evidence.
-        #[cfg(feature = "pre-557")]
-        Error::ExtractedErrors(_) => "ExtractedErrors",
-        #[cfg(not(feature = "pre-557"))]
         Error::MultipleRegionErrors(_) => "MultipleRegionErrors",
         Error::MultipleKeyErrors(_) => "MultipleKeyErrors",
         Error::ColumnFamilyError(_) => "ColumnFamilyError",
@@ -367,29 +358,6 @@ mod tests {
         assert_eq!(obs.native.unwrap().r#type, "KeyError");
     }
 
-    #[cfg(feature = "pre-557")]
-    #[test]
-    fn multiple_and_extracted_share_a_class_but_not_a_native_type() {
-        // THE finding-1 invariant, and the whole reason `native` exists.
-        //
-        // `check_txn_status` matches ExtractedErrors; the plan shape only ever
-        // delivers MultipleKeyErrors. The underlying FACT is identical (a
-        // txn_not_found), so the class must be identical — otherwise the parity diff
-        // would flag a difference that is not one. But the client's own type is the
-        // bug, so it must survive into the trace.
-        let inner = || key_error(|ke| ke.txn_not_found = Some(Default::default()));
-
-        let multi = classify(&Error::MultipleKeyErrors(vec![inner()]));
-        let extracted = classify(&Error::ExtractedErrors(vec![inner()]));
-
-        assert_eq!(multi.class, Class::TxnNotFound);
-        assert_eq!(extracted.class, Class::TxnNotFound, "same fact, same class");
-
-        assert_eq!(multi.native.unwrap().r#type, "MultipleKeyErrors");
-        assert_eq!(extracted.native.unwrap().r#type, "ExtractedErrors");
-    }
-
-    #[cfg(not(feature = "pre-557"))]
     #[test]
     fn multiple_region_errors_classify_by_their_members() {
         // #557: a set of region errors is a cluster event like a lone one, so the run
