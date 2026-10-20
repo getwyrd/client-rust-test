@@ -26,6 +26,11 @@ use tikv_client::Transaction;
 #[cfg(feature = "test-probes")]
 const ORPHAN_LOCK_TTL_MS: u64 = 1000;
 
+/// How long `prewrite_only` waits for TiKV. A timeout is a `driver_error`: the setup did
+/// not happen, so the run is inadmissible.
+#[cfg(feature = "test-probes")]
+const PREWRITE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// What `hello` lists beyond the always-present capabilities.
 pub fn features() -> Vec<String> {
     if cfg!(feature = "test-probes") {
@@ -54,9 +59,14 @@ pub async fn prewrite_only(
     probe
         .set_primary_key(primary)
         .set_lock_ttl(ORPHAN_LOCK_TTL_MS);
-    match probe.prewrite(keys).await {
-        Ok(_) => Observation::ok().with_start_ts(start_ts),
-        Err(e) => Observation::driver_error(format!("prewrite_only: {e:?}")),
+    // A prewrite TiKV accepts but never answers must not stall the run: the runner waits
+    // on this reply with no deadline of its own.
+    match tokio::time::timeout(PREWRITE_DEADLINE, probe.prewrite(keys)).await {
+        Ok(Ok(_)) => Observation::ok().with_start_ts(start_ts),
+        Ok(Err(e)) => Observation::driver_error(format!("prewrite_only: {e:?}")),
+        Err(_) => Observation::driver_error(format!(
+            "prewrite_only: no answer within {PREWRITE_DEADLINE:?}"
+        )),
     }
 }
 
