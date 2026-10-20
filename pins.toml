@@ -30,12 +30,12 @@ upstream = "https://github.com/tikv/client-rust.git"
 fork     = "https://github.com/getwyrd/client-rust.git"
 branch   = "integration"
 
-# integration @ "Merge pull request #3 from getwyrd/sync-upstream-1b883bf", 2026-10-20:
-# upstream_base plus #558 (TSO deadline, still open upstream) and the fork-only AGENTS.md
-# rubric. #557 (error variants) and #551 (failpoint lock residue) are in upstream_base
-# now. Pin one commit and bump it by hand, as a reviewed step: a bump re-states every
-# ledger claim. (Previous pin: b10bc69, client-rust-test #66 — see README § History.)
-rev = "18eff6d99ea8b9af5b9c6f5d3ae7bbbf44569a97"
+# integration @ "Merge pull request #4 from getwyrd/test-probes", 2026-10-20:
+# upstream_base plus #558 (TSO deadline) and the test-utils probe (tikv/client-rust#577),
+# both still open upstream, and the fork-only AGENTS.md rubric. Pin one commit and bump it
+# by hand, as a reviewed step: a bump re-states every ledger claim. (Previous pin:
+# 18eff6d, client-rust-test #79 — see README § History.)
+rev = "4c9f3615c2f3aac3f4aff8387d5bed40e1532876"
 
 # master @ "chore: Add IDE components to pinned toolchain (#575)", 2026-10-19.
 # Where integration meets upstream master. integration is updated by merges only and is
