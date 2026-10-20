@@ -381,7 +381,10 @@ PY
 # traces (or keeping only the divergence artifacts) would have SKIPPED the one proof of
 # which client-go binary actually ran, and the skip would have looked like a pass. An
 # absent check must never read as a satisfied one, so every adjudicated scenario must
-# produce the traces its ledger entry depends on, and each must carry a Go binding.
+# produce the traces its ledger entry depends on, and its ORACLE run (the first run in
+# `compare`, scenario/v1 §4.2.6) must carry a Go binding. Every Go binding in any compared
+# run is checked. A subject run may be all-Rust: it then has no client-go to attest, and
+# the oracle's identity is still proven by the oracle run.
 python3 - "$PINS" "$LEDGER" "$MODE" <<'PY' || exit 2
 import json, pathlib, sys, tomllib
 
@@ -399,8 +402,8 @@ for gap in ledger.get("gap", []):
     scen = json.loads(scen_path.read_text())
     name = scen["name"]
 
-    # Exactly the runs this gap's verdict is computed from.
-    for run in scen["compare"]:
+    # Exactly the runs this gap's verdict is computed from; the first is the oracle.
+    for i, run in enumerate(scen["compare"]):
         f = pathlib.Path(f"results/traces/{name}.{run}.json")
         if not f.exists():
             refuse(f"{gap['id']}: {f} is missing. The verdict is computed from these traces, "
@@ -408,8 +411,9 @@ for gap in ledger.get("gap", []):
 
         t = json.loads(f.read_text())
         go_bindings = [rb for rb in t.get("roles", []) if rb["driver"] == "go"]
-        if not go_bindings:
-            refuse(f"{gap['id']}: {f} has no `go` role, so nothing attests which client-go ran.")
+        if i == 0 and not go_bindings:
+            refuse(f"{gap['id']}: {f} is the oracle run and has no `go` role, so nothing "
+                   "attests which client-go ran.")
 
         for rb in go_bindings:
             c = rb["hello"]["client"]

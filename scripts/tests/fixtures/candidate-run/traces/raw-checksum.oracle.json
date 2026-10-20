@@ -10,10 +10,10 @@
       },
       "harness": {
         "base": "884c4652e4588a2bc3265ce9f464e9b90f63f8c6",
-        "digest": "882387605226a136eafdb40a2d8537fca6c737701053ee8ad9dad2866d8d8c35"
+        "digest": "d1a8ac0d5587f60d1deed410e2f605a204af5cb102d1fb88b632253b25d7d7e5"
       }
     },
-    "captured_at": "2026-10-20T13:07:15Z",
+    "captured_at": "2026-10-20T13:13:02Z",
     "client_go": {
       "matches_pin": true,
       "module": "github.com/tikv/client-go/v2",
@@ -42,8 +42,8 @@
       "verified": true
     },
     "harness": {
-      "dirty": false,
-      "rev": "f3f55791c1dc38baee311688735106c7f2717846"
+      "dirty": true,
+      "rev": "56cbe2873955c057e6d9c7ea023e1aa1573af8b8"
     },
     "mode": "candidate",
     "schema": "parity-provenance/v1",
@@ -101,7 +101,7 @@
       }
     }
   ],
-  "prefix": "gate/raw-checksum/1792501655524458425/",
+  "prefix": "gate/raw-checksum/1792502022392951813/",
   "steps": [
     {
       "id": "writer-open",
@@ -150,7 +150,7 @@
       "observation": {
         "class": "ok",
         "checksum": {
-          "crc64_xor": 5121581627657818515,
+          "crc64_xor": 4495123877008547209,
           "total_kvs": 3,
           "total_bytes": 149
         }

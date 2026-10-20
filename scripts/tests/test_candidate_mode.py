@@ -113,6 +113,41 @@ class Scratch(unittest.TestCase):
 
 
 class LedgerCheckCandidate(Scratch):
+    def edit_trace(self, scenario, run, fn):
+        f = self.results / "traces" / f"{scenario}.{run}.json"
+        t = json.loads(f.read_text())
+        fn(t)
+        f.write_text(json.dumps(t))
+
+    def test_an_all_rust_subject_run_is_judged(self):
+        # G-0001: each client built its own orphan, so the subject run has no client-go
+        # to attest, and the oracle run still proves which client-go ran.
+        t = json.loads((self.results / "traces" /
+                        "orphaned-lock-resolution.subject.json").read_text())
+        self.assertEqual({rb["driver"] for rb in t["roles"]}, {"rust"})
+        r = self.candidate()
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_the_oracle_run_must_attest_client_go(self):
+        def all_rust(t):
+            for rb in t["roles"]:
+                rb["driver"] = "rust"
+        self.edit_trace("orphaned-lock-resolution", "oracle", all_rust)
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("is the oracle run and has no `go` role", r.stderr)
+
+    def test_a_go_binding_in_the_subject_run_is_still_checked(self):
+        def wrong_go(t):
+            for rb in t["roles"]:
+                if rb["driver"] == "go":
+                    rb["hello"]["client"]["version"] = "v2.0.0"
+        # G-0003's subject run keeps a Go orphaner.
+        self.edit_trace("orphaned-lock-interop", "subject", wrong_go)
+        r = self.candidate()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("but the pin names", r.stderr)
+
     def test_reports_the_declared_gap_and_holds_the_rest(self):
         r = self.candidate()
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -120,7 +155,7 @@ class LedgerCheckCandidate(Scratch):
         self.assertNotIn("every claim holds at the pinned", r.stdout)
         v = self.verdict()
         self.assertEqual((v["gap"], v["outcome"], v["others_hold"]), ("G-0002", "XDIVERGE", True))
-        self.assertEqual(v["others"], {"G-0001": "HOLDS"})
+        self.assertEqual(v["others"], {"G-0001": "HOLDS", "G-0003": "HOLDS"})
 
     def test_a_closed_gap_is_reported_not_failed(self):
         f = self.results / "divergence.raw-checksum.json"
