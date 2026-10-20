@@ -215,29 +215,14 @@ jobs:
       - name: cluster up
         run: make cluster-up
       # upstream_base lacks client-rust's test probe, so the Rust driver builds without
-      # it and answers `unsupported` to prewrite_only, and a scenario whose Rust side
-      # builds its state with the probe (G-0001) is inadmissible here. The build and the
-      # driver tests must pass; the diff reports an inadmissible run as a warning, since
-      # this view is never ledger evidence. Once upstream_base has the probe, drop
-      # DRIVER_FEATURES= and the `||` below, and the switch in rust-driver/src/probe.rs.
+      # it and answers `unsupported` to prewrite_only. Once upstream_base has the probe,
+      # drop DRIVER_FEATURES= here and the switch in rust-driver/src/probe.rs.
       - name: driver unit tests (without the test probe)
         run: cargo test -p rust-driver
       - name: build the drivers (without the test probe)
         run: make drivers DRIVER_FEATURES=
       - name: parity diff at upstream_base (informational)
-        shell: bash
-        run: |
-          set -o pipefail
-          if make parity DRIVER_FEATURES= 2>&1 | tee parity.log; then exit 0; fi
-          # Only a run that needs the probe on the Rust side may fail here, and only by
-          # being inadmissible; any other failure fails the step.
-          expected='^INADMISSIBLE: scenario `orphaned-lock-resolution` run `subject`'
-          if grep -q "$expected" parity.log && [ "$(grep -c '^INADMISSIBLE:' parity.log)" = 1 ] \
-             && ! grep -qE '^(error|REFUSING)' parity.log; then
-            echo "::warning::upstream view: G-0001's Rust run needs the test probe, which upstream_base lacks"
-            exit 0
-          fi
-          exit 1
+        run: make parity DRIVER_FEATURES=
       - name: upstream view
         if: always()
         uses: actions/upload-artifact@v4
