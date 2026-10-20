@@ -202,17 +202,18 @@ alike, and with a bridge network no single address reaches both, so isolation co
 ports, not networks. Profiles: `single`, `3store` (`chaos` arrives with the chaos tier).
 State lives in `$PARITY_BROKER_DIR` (default `~/.local/state/parity-broker`).
 
-## Gate verdict (v8.5.5 cluster, client-rust `integration` @ 18eff6d)
+## Gate verdict (v8.5.5 cluster, client-rust `integration` @ 4c9f361)
 
-> At `18eff6d` (the fork's `integration`, 2026-10-20: upstream `master` @ `1b883bf` plus
-> tikv/client-rust#558 and the fork's `AGENTS.md`) the gate is **all green**, `d6` and
-> `d7` included, and the ledger holds: G-0001 is FIXED and asserted to **agree**, G-0002
-> still diverges as declared. The upstream view at `1b883bf` agrees with it, and builds
-> with no feature switch: #557 and #551 merged upstream, so `pre-557` is gone (ADR-0001).
-> Confirm the checkout with `git -C ../client-rust describe --tags --always --dirty`.
-> What changed since the previous pin: upstream `master` moved from `3408d95` to `1b883bf`
-> (#557, #551, #575) and `integration` merged it; no verdict and no ledger claim moved.
-> Evidence: [`findings/gate-evidence-18eff6d.txt`](findings/gate-evidence-18eff6d.txt)
+> At `4c9f361` (the fork's `integration`, 2026-10-20: upstream `master` @ `1b883bf` plus
+> tikv/client-rust#558, the `test-utils` probe offered as tikv/client-rust#577, and the
+> fork's `AGENTS.md`) the gate is **all green**, `d6` and `d7` included, and the ledger
+> holds: G-0001 is FIXED and asserted to **agree**, G-0002 still diverges as declared. The
+> upstream view at `1b883bf` agrees with it; it builds the Rust driver without the probe,
+> which upstream lacks. Confirm the checkout with
+> `git -C ../client-rust describe --tags --always --dirty`. What changed since the
+> previous pin: `integration` gained the probe, and the Rust driver's `prewrite_only`
+> drives it (WP-07); no verdict and no ledger claim moved.
+> Evidence: [`findings/gate-evidence-4c9f361.txt`](findings/gate-evidence-4c9f361.txt)
 > (full `make verdict` and `make ledger` output at this pin, and the upstream view).
 
 **Confirmed working** — the proposal's mapping is implementable as specified:
@@ -312,6 +313,14 @@ fixed in client-rust.
 (A fourth candidate — "`snapshot()` needs explicit `.read_only()` or drops
 panic" — did **not** survive verification: `TransactionClient::snapshot`
 applies `.read_only()` internally, client.rs:230. Retracted.)
+
+### History: the verdict at `18eff6d`
+
+> The fork's `integration` after merging upstream `master` @ `1b883bf` (2026-10-20), with
+> #557 and #551 now upstream and #558 carried. The gate was **all green**, the ledger held
+> (G-0001 FIXED and asserted to agree, G-0002 diverging as declared), and the upstream
+> view built with no feature switch, `pre-557` having been deleted.
+> Evidence: [`findings/gate-evidence-18eff6d.txt`](findings/gate-evidence-18eff6d.txt).
 
 ### History: the verdict at `b10bc69`
 
