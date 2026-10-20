@@ -353,9 +353,11 @@ Verify: `scenarios/reverse-scan-region-boundary.json` (`expect = "diverges"` tod
 - **Exported test probes** — the force multiplier. client-go ships ~132 probe functions
   from non-test files (`txnkv/transaction/test_probe.go` et al.); client-rust's mocks
   are `#[cfg(test)]`-gated (`lib.rs:116`), which is *why* all deterministic state
-  manufacture in this harness is Go-only. A feature-gated `test-utils` surface
-  (prewrite-only, committer controls) makes every future scenario cheaper and should be
-  filed upstream as a finding in its own right.
+  manufacture in this harness was Go-only. **First slice landed on the fork (WP-07):**
+  a `test-utils` feature with `Transaction::probe` (set primary key, set lock TTL,
+  prewrite chosen keys, commit primary only), offered upstream as a draft PR; G-0001
+  now builds its orphan on both sides. Further probes get added when a scenario first
+  needs one.
 
 ## 7. Phase 4 — architectural projects *(each warrants its own design doc)*
 
@@ -416,8 +418,8 @@ Harness prerequisites this roadmap imposes (themselves pin-stated):
    3 replicas per region); the scenarios that use it are 5.4's;
 2. a **PD-observation step** for the runner (safepoint checks, 5.8) — consistent with
    the existing rule that PD preconditions belong to the runner, never to drivers;
-3. once upstream probes exist (§6), a Rust orphan-factory so interesting scenarios stop
-   being Go-setup-only.
+3. a Rust orphan-factory so interesting scenarios stop being Go-setup-only — **landed**
+   with client-rust's test probe (§6, WP-07): the Rust driver's `prewrite_only`.
 
 ## 9. Upstream engagement
 
