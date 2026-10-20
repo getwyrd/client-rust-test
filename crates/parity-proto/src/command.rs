@@ -7,9 +7,11 @@
 //!
 //! The command set is deliberately small. Every command here is one both clients can
 //! *attempt*; where one cannot, it answers `Class::Unsupported` rather than the
-//! driver emulating it. `prewrite_only` is the sharp case: client-go implements it
-//! with `CommitterProbe`, client-rust has no probe surface at all and says so — and
-//! that asymmetry is itself a finding worth filing, not a hole to paper over.
+//! driver emulating it. `prewrite_only` was the sharp case: client-go implements it
+//! with `CommitterProbe`, and client-rust had no probe surface at all and said so,
+//! until its `test-utils` feature added `Transaction::probe` (getwyrd/client-rust
+//! `test-probes`, offered upstream). A client-rust without that feature still answers
+//! `unsupported`.
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -94,7 +96,8 @@ pub enum Command {
     ///
     /// client-go implements this with `CommitterProbe` (`SetPrimaryKey`,
     /// `MutationsOfKeys`, `PrewriteMutations` — all in NON-test files, hence
-    /// importable). client-rust exposes no equivalent and returns `Unsupported`.
+    /// importable). client-rust implements it with `Transaction::probe` behind its
+    /// `test-utils` feature; a client-rust without that feature returns `Unsupported`.
     ///
     /// Why this matters more than it looks: it holds the SETUP CONSTANT across both
     /// runs, so any divergence is attributable to the reader alone. `gate::d6` cannot
