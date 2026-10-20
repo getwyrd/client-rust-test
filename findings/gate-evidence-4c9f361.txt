@@ -1,6 +1,6 @@
 # Gate + ledger evidence at the client-rust pin 4c9f361 (getwyrd integration; upstream_base 1b883bf)
-# Captured 2026-10-20T13:08:11Z on a leased single-node TiKV/PD v8.5.5 cluster, PARITY_STRICT=1.
-# harness: 0c66bc2   client-rust: 0.4.0-47-g4c9f361   client-go: 56e5933
+# Captured 2026-10-20T13:14:55Z on a leased single-node TiKV/PD v8.5.5 cluster, PARITY_STRICT=1.
+# harness: b7c1d6b   client-rust: 0.4.0-47-g4c9f361   client-go: 56e5933
 # Lines starting with `#` are commentary, written with the file. Every other line is the
 # capture script's output, verbatim except for two filters: in `## make verdict`, indented
 # cargo progress lines (Compiling, Checking, Finished, Running, Downloaded, Downloading,
@@ -8,16 +8,21 @@
 # level; they start with a `[YYYY/` timestamp) and indented Compiling, Checking, Finished,
 # Running lines are dropped. `## make pins-check` and the trace summary are unfiltered.
 #
-# The Rust driver here is built with client-rust's test probe (PROBE_FEATURES), so its
-# `prewrite_only` drives Transaction::probe. At this harness no scenario has a Rust
-# orphaner yet (G-0001's subject run still binds the orphaner to go; #82 changes that),
-# so the ledger below is the same claims as at 18eff6d, re-stated at the new pin.
+# At this harness G-0001 is all-Go against all-Rust: in the subject run client-rust's test
+# probe builds the orphan (Rust driver `prewrite_only`), and the trace summary below is
+# that run's. G-0003 is the mixed case, a client-go orphan read by client-rust.
 #
 # The upstream view is the same diff at upstream_base, run as CI's informational
 # `upstream-view` job runs it: PARITY_STRICT=0 and DRIVER_FEATURES= (no test probe, which
-# upstream_base lacks). It is not ledger evidence, and its provenance banner says ADVISORY
-# RUN because the crate is not at the pin. The harness commit above is the one this run
-# used; the commit that writes this file changes nothing but this file.
+# upstream_base lacks). G-0001's subject run cannot build its orphan there, so it is
+# INADMISSIBLE and the view exits 2; CI reports that as a warning. It is not ledger
+# evidence, and its provenance banner says ADVISORY RUN because the crate is not at the pin.
+#
+# An earlier capture at this pin, harness 0c66bc2 (#81, before G-0001 moved to all-Rust),
+# was green with G-0001 and G-0002 holding. A capture at 56cbe28 on this branch refused to
+# settle: ledger-check then required a Go binding in every compared run, which an all-Rust
+# subject run has none of; b7c1d6b narrows that to the oracle run. The harness commit above
+# is the one this run used; the commit that writes this file changes nothing but this file.
 
 ## make pins-check
 ./scripts/check-pins.sh
@@ -46,41 +51,42 @@ provenance -> results/provenance.json
 running 18 tests
 test b1_create_is_all_or_nothing ... ok
 test d1_write_conflict_error_shape_is_key_error_with_conflict ... ok
-test d4_adjacent_prefixes_do_not_bleed ... ok
 test a1_roundtrip_through_object_safe_trait ... ok
 test b3_file_commit_is_a_version_cas ... ok
-test d2_get_for_update_reads_latest_committed_value ... ok
-test c2_require_absent_exactly_one_creator_optimistic_locked ... ok
 test b2_rename_is_atomic_delete_plus_put ... ok
+test d2_get_for_update_reads_latest_committed_value ... ok
+test d4_adjacent_prefixes_do_not_bleed ... ok
+test c2_require_absent_exactly_one_creator_optimistic_locked ... ok
 test a2_values_round_trip_byte_identically ... ok
 test a3_conflict_is_ok_and_leaves_no_side_effects ... ok
 test c2_require_absent_exactly_one_creator_pessimistic ... ok
 test c1_version_cas_exactly_one_winner_optimistic_locked ... ok
 test c1_version_cas_exactly_one_winner_pessimistic ... ok
+[2026-10-20T13:14:59Z ERROR tikv_client::request::plan] single_plan_handler: failed to join task (1 tasks): task 7365 was cancelled
 test d5_woken_lock_waiter_surfaces_a_classifiable_write_conflict ... ok
 test c3_write_skew_anomaly_and_the_lock_that_prevents_it ... ok
-test d3_scan_pages_beyond_one_batch ... ok
 test p0_cluster_can_split_regions ... ok
+test d3_scan_pages_beyond_one_batch ... ok
 test d6_orphaned_lock_must_be_resolved_by_client_rust ... ok
 
 successes:
 
 ---- d1_write_conflict_error_shape_is_key_error_with_conflict stdout ----
-observed write-conflict error shape: MultipleKeyErrors([KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469893564992323670), conflict_start_ts: TimeStamp(469893564992323667), conflict_commit_ts: TimeStamp(469893564992323747), key: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], reason: Optimistic })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469893564992323670, conflict_ts: 469893564992323667, key: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], conflict_commit_ts: 469893564992323747, reason: Optimistic }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None, txn_lock_not_found: None, debug_info: None })])
+observed write-conflict error shape: MultipleKeyErrors([KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469893670334890121), conflict_start_ts: TimeStamp(469893670334890109), conflict_commit_ts: TimeStamp(469893670334890152), key: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], reason: Optimistic })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469893670334890121, conflict_ts: 469893670334890109, key: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 49, 47, 99, 111, 110, 116, 101, 110, 100, 101, 100], conflict_commit_ts: 469893670334890152, reason: Optimistic }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None, txn_lock_not_found: None, debug_info: None })])
 
 ---- d5_woken_lock_waiter_surfaces_a_classifiable_write_conflict stdout ----
-observed wake-up error shape: PessimisticLockError { inner: MultipleKeyErrors([KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469893564992323774), conflict_start_ts: TimeStamp(469893564992323741), conflict_commit_ts: TimeStamp(469893565084074001), key: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], reason: PessimisticRetry })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469893564992323774, conflict_ts: 469893564992323741, key: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], conflict_commit_ts: 469893565084074001, reason: PessimisticRetry }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None, txn_lock_not_found: None, debug_info: None })]), success_keys: [] }
+observed wake-up error shape: PessimisticLockError { inner: MultipleKeyErrors([KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469893670347997253), conflict_start_ts: TimeStamp(469893670347997226), conflict_commit_ts: TimeStamp(469893670426640386), key: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], reason: PessimisticRetry })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469893670347997253, conflict_ts: 469893670347997226, key: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], primary: [103, 97, 116, 101, 47, 100, 53, 47, 103, 117, 97, 114, 100, 101, 100], conflict_commit_ts: 469893670426640386, reason: PessimisticRetry }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None, txn_lock_not_found: None, debug_info: None })]), success_keys: [] }
 
 ---- c3_write_skew_anomaly_and_the_lock_that_prevents_it stdout ----
 observed wake-up behavior for the blocked mutator: Conflict
 
 ---- p0_cluster_can_split_regions stdout ----
-cluster splits regions: 5 -> 132 regions (0 re-writes), stores Up [1]
+cluster splits regions: 446 -> 481 regions (0 re-writes), stores Up [1]
 
 ---- d6_orphaned_lock_must_be_resolved_by_client_rust stdout ----
-cross-region precondition met after 1 split request(s): 12 != 4
-orphan confirmed: lock on "gate/d6/1792501697550006670/z-secondary", primary "gate/d6/1792501697550006670/a-primary", ttl 3006ms
-within-TTL read (may fail on any client): TxnNotFound(TxnNotFound { start_ts: 469893565136502860, primary_key: [103, 97, 116, 101, 47, 100, 54, 47, 49, 55, 57, 50, 53, 48, 49, 54, 57, 55, 53, 53, 48, 48, 48, 54, 54, 55, 48, 47, 97, 45, 112, 114, 105, 109, 97, 114, 121] })
+cross-region precondition met after 1 split request(s): 5274 != 1820
+orphan confirmed: lock on "gate/d6/1792502099400273817/z-secondary", primary "gate/d6/1792502099400273817/a-primary", ttl 3006ms
+within-TTL read (may fail on any client): TxnNotFound(TxnNotFound { start_ts: 469893670492176402, primary_key: [103, 97, 116, 101, 47, 100, 54, 47, 49, 55, 57, 50, 53, 48, 50, 48, 57, 57, 52, 48, 48, 50, 55, 51, 56, 49, 55, 47, 97, 45, 112, 114, 105, 109, 97, 114, 121] })
 orphaned lock resolved by client-rust after TTL — key readable
 
 
@@ -104,7 +110,7 @@ successes:
     d6_orphaned_lock_must_be_resolved_by_client_rust
     p0_cluster_can_split_regions
 
-test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.17s
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.16s
 
 OK: gate is green apart from its expected-red tests.
 
@@ -122,7 +128,7 @@ after a failed commit + rollback(): pessimistic key holds 0 lock(s), optimistic 
 successes:
     d7_pessimistic_rollback_leaves_prewrite_locks
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
 OK: failpoint_gate is green apart from its expected-red tests.
 
@@ -142,6 +148,43 @@ provenance -> results/provenance.json
   on pin (4c9f3615c2f3aac3f4aff8387d5bed40e1532876) — this run is admissible as evidence.
 ./target/debug/parity-runner
 
+═══ orphaned-lock-interop ═══
+INTEROP: a client-go transaction leaves the orphan and a client-rust reader must
+resolve it. This was G-0001's subject run until the Rust driver could build the orphan
+itself; G-0001 is now all-Go against all-Rust, and this entry keeps the mixed case.
+
+An orphaned lock: a lock on a SECONDARY key whose PRIMARY was never written.
+The primary carries no lock and no write record, so a reader cannot learn the
+transaction's fate from it and MUST escalate to rollback_if_not_exist once the TTL
+expires.
+
+client-go does: the read succeeds, and its async resolver then clears the lock.
+client-rust did not until tikv/client-rust#561 (pin 3408d95): check_txn_status matched
+only Error::ExtractedErrors, but the plan shape (retry_multi_region -> merge ->
+extract_error) could only deliver Error::MultipleKeyErrors, so the rollback_if_not_exist
+heal path was dead code -- the read failed, the lock stayed, and the key was left
+unreadable AND unwritable forever (#543). That showed as a divergence on `native.type`
+(MultipleKeyErrors vs client-go's untyped error), visible only because the observation
+keeps each client's own taxonomy alongside the canonical class. Fixed for this case by
+the same #561.
+
+BOTH RUNS SHARE ONE SETUP: client-go manufactures the orphan in both, using
+CommitterProbe (exported from a NON-test file). Only the READER changes. So any
+divergence below is attributable to the reader alone -- a strictly stronger claim than
+gate::d6 can make, since d6 must manufacture the orphan through the public API with a
+region split and a racing transaction, and therefore cannot tell 'I failed to BUILD the
+orphan' apart from 'the client failed to RESOLVE it'.
+
+── run `oracle` [orphaner=go reader=go]
+   9 steps -> results/traces/orphaned-lock-interop.oracle.json
+
+── run `subject` [orphaner=go reader=rust]
+   9 steps -> results/traces/orphaned-lock-interop.subject.json
+
+── diff: oracle (oracle) vs subject (subject)
+   NO DIVERGENCE — the two clients agree on every compared field.
+   -> results/divergence.orphaned-lock-interop.json
+
 ═══ orphaned-lock-resolution ═══
 An orphaned lock: a lock on a SECONDARY key whose PRIMARY was never written.
 The primary carries no lock and no write record, so a reader cannot learn the
@@ -158,17 +201,19 @@ unreadable AND unwritable forever (#543). That showed as a divergence on `native
 keeps each client's own taxonomy alongside the canonical class. Ledger G-0001 is now
 FIXED and asserts the two clients AGREE on every compared field.
 
-BOTH RUNS SHARE ONE SETUP: client-go manufactures the orphan in both, using
-CommitterProbe (exported from a NON-test file). Only the READER changes. So any
-divergence below is attributable to the reader alone -- a strictly stronger claim than
-gate::d6 can make, since d6 must manufacture the orphan through the public API with a
-region split and a racing transaction, and therefore cannot tell 'I failed to BUILD the
-orphan' apart from 'the client failed to RESOLVE it'.
+EACH RUN BUILDS ITS OWN ORPHAN with its own client's test probe: client-go's
+CommitterProbe in the oracle run, client-rust's TransactionProbe (feature test-utils)
+in the subject run, with the same primary, keys and 1 s lock TTL. The
+`reader-confirms-orphan` assert (exactly one lock) checks the setup held in each run,
+so a run that failed to BUILD the orphan is inadmissible rather than mistaken for one
+that failed to RESOLVE it -- the distinction gate::d6 cannot make, since it must build
+the orphan through the public API with a region split and a racing transaction. The
+mixed case (Go orphaner, Rust reader) is G-0003.
 
 ── run `oracle` [orphaner=go reader=go]
    9 steps -> results/traces/orphaned-lock-resolution.oracle.json
 
-── run `subject` [orphaner=go reader=rust]
+── run `subject` [orphaner=rust reader=rust]
    9 steps -> results/traces/orphaned-lock-resolution.subject.json
 
 ── diff: oracle (oracle) vs subject (subject)
@@ -227,6 +272,10 @@ lifecycle for a closed gap.
       checker-checksum · class: oracle='ok' subject='unsupported'
       checker-checksum · unsupported.detail: oracle='<step absent>' subject="client-rust has no raw checksum: tikv-client implements no RawChecksum request. client-go's rawkv.Checksum returns crc64_xor/total_kvs/total_bytes computed server-side. The driver does NOT emulate it: the gap is the finding (G-0002)."
 
+═══ G-0003 — An orphaned lock left by client-go must be resolvable by a client-rust reader
+    scenario: scenarios/orphaned-lock-interop.json   expect: agrees   status: FIXED
+    HOLDS — the two clients agree on every compared field.
+
 LEDGER: every claim holds at the pinned revisions.
 ledger exit 0
 
@@ -259,6 +308,43 @@ provenance -> results/provenance.json
   └──────────────────────────────────────────────────────────────────────────┘
 ./target/debug/parity-runner
 
+═══ orphaned-lock-interop ═══
+INTEROP: a client-go transaction leaves the orphan and a client-rust reader must
+resolve it. This was G-0001's subject run until the Rust driver could build the orphan
+itself; G-0001 is now all-Go against all-Rust, and this entry keeps the mixed case.
+
+An orphaned lock: a lock on a SECONDARY key whose PRIMARY was never written.
+The primary carries no lock and no write record, so a reader cannot learn the
+transaction's fate from it and MUST escalate to rollback_if_not_exist once the TTL
+expires.
+
+client-go does: the read succeeds, and its async resolver then clears the lock.
+client-rust did not until tikv/client-rust#561 (pin 3408d95): check_txn_status matched
+only Error::ExtractedErrors, but the plan shape (retry_multi_region -> merge ->
+extract_error) could only deliver Error::MultipleKeyErrors, so the rollback_if_not_exist
+heal path was dead code -- the read failed, the lock stayed, and the key was left
+unreadable AND unwritable forever (#543). That showed as a divergence on `native.type`
+(MultipleKeyErrors vs client-go's untyped error), visible only because the observation
+keeps each client's own taxonomy alongside the canonical class. Fixed for this case by
+the same #561.
+
+BOTH RUNS SHARE ONE SETUP: client-go manufactures the orphan in both, using
+CommitterProbe (exported from a NON-test file). Only the READER changes. So any
+divergence below is attributable to the reader alone -- a strictly stronger claim than
+gate::d6 can make, since d6 must manufacture the orphan through the public API with a
+region split and a racing transaction, and therefore cannot tell 'I failed to BUILD the
+orphan' apart from 'the client failed to RESOLVE it'.
+
+── run `oracle` [orphaner=go reader=go]
+   9 steps -> results/traces/orphaned-lock-interop.oracle.json
+
+── run `subject` [orphaner=go reader=rust]
+   9 steps -> results/traces/orphaned-lock-interop.subject.json
+
+── diff: oracle (oracle) vs subject (subject)
+   NO DIVERGENCE — the two clients agree on every compared field.
+   -> results/divergence.orphaned-lock-interop.json
+
 ═══ orphaned-lock-resolution ═══
 An orphaned lock: a lock on a SECONDARY key whose PRIMARY was never written.
 The primary carries no lock and no write record, so a reader cannot learn the
@@ -275,22 +361,24 @@ unreadable AND unwritable forever (#543). That showed as a divergence on `native
 keeps each client's own taxonomy alongside the canonical class. Ledger G-0001 is now
 FIXED and asserts the two clients AGREE on every compared field.
 
-BOTH RUNS SHARE ONE SETUP: client-go manufactures the orphan in both, using
-CommitterProbe (exported from a NON-test file). Only the READER changes. So any
-divergence below is attributable to the reader alone -- a strictly stronger claim than
-gate::d6 can make, since d6 must manufacture the orphan through the public API with a
-region split and a racing transaction, and therefore cannot tell 'I failed to BUILD the
-orphan' apart from 'the client failed to RESOLVE it'.
+EACH RUN BUILDS ITS OWN ORPHAN with its own client's test probe: client-go's
+CommitterProbe in the oracle run, client-rust's TransactionProbe (feature test-utils)
+in the subject run, with the same primary, keys and 1 s lock TTL. The
+`reader-confirms-orphan` assert (exactly one lock) checks the setup held in each run,
+so a run that failed to BUILD the orphan is inadmissible rather than mistaken for one
+that failed to RESOLVE it -- the distinction gate::d6 cannot make, since it must build
+the orphan through the public API with a region split and a racing transaction. The
+mixed case (Go orphaner, Rust reader) is G-0003.
 
 ── run `oracle` [orphaner=go reader=go]
    9 steps -> results/traces/orphaned-lock-resolution.oracle.json
 
-── run `subject` [orphaner=go reader=rust]
-   9 steps -> results/traces/orphaned-lock-resolution.subject.json
+── run `subject` [orphaner=rust reader=rust]
 
-── diff: oracle (oracle) vs subject (subject)
-   NO DIVERGENCE — the two clients agree on every compared field.
-   -> results/divergence.orphaned-lock-resolution.json
+   INADMISSIBLE — this run is evidence of nothing.
+   step `reader-confirms-orphan` precondition failed: expected 1 lock(s), observed 0. The scenario's SETUP did not hold, so nothing downstream of it is evidence about either client.
+
+INADMISSIBLE: scenario `orphaned-lock-resolution` run `subject`: step `reader-confirms-orphan` precondition failed: expected 1 lock(s), observed 0. The scenario's SETUP did not hold, so nothing downstream of it is evidence about either client.
 
 ═══ raw-checksum ═══
 THE FIRST CAPABILITY CLAIM: raw Checksum exists in client-go and not in client-rust.
@@ -332,4 +420,5 @@ lifecycle for a closed gap.
          oracle: <step absent>
         subject: client-rust has no raw checksum: tikv-client implements no RawChecksum request. client-go's rawkv.Checksum returns crc64_xor/total_kvs/total_bytes computed server-side. The driver does NOT emulate it: the gap is the finding (G-0002).
    -> results/divergence.raw-checksum.json
-upstream view exit 0
+make: *** [Makefile:129: parity] Error 1
+upstream view exit 2
