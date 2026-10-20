@@ -29,3 +29,11 @@ libc = "0.2"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio.workspace = true
+
+# Drive client-rust's test probe (`Transaction::probe`) for `prewrite_only`. It needs
+# tikv-client's `test-utils` feature, which this manifest cannot name: Cargo rejects the
+# reference outright against a client-rust that lacks the feature, as upstream_base does.
+# So the Makefile enables both on the command line, and CI's upstream view enables
+# neither (ADR-0001: one switch, confined to src/probe.rs).
+[features]
+test-probes = []

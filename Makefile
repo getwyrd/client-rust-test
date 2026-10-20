@@ -36,9 +36,15 @@ export PARITY_STRICT ?= 0
 
 default: check
 
+# client-rust's test probe, which the Rust driver's `prewrite_only` drives. Named here,
+# not in a manifest, because Cargo rejects a manifest naming tikv-client/test-utils when
+# the client checkout lacks it, as upstream_base does (rust-driver/src/probe.rs, ADR-0001).
+PROBE_FEATURE_LIST := rust-driver/test-probes,tikv-client/test-utils
+PROBE_FEATURES := --features $(PROBE_FEATURE_LIST)
+
 # --all-features would switch on `failpoints` for the whole workspace, compiling
 # fault injection into every member. Name the features instead.
-CARGO_FEATURES := --features wyrd-gate/integration-tests,wyrd-gate/failpoints
+CARGO_FEATURES := --features wyrd-gate/integration-tests,wyrd-gate/failpoints,$(PROBE_FEATURE_LIST)
 
 check: pins-check spec-check go-check broker-test
 	cargo fmt --all -- --check
@@ -72,7 +78,7 @@ provenance:
 # The cluster-free tests: prefix arithmetic, conflict classification, and the
 # compile-time Send/object-safety obligations (checked by building at all).
 unit-test:
-	cargo test --workspace --lib
+	cargo test --workspace --lib $(PROBE_FEATURES)
 
 # The gate proper — needs a reachable cluster ($PD_ADDRS). `--show-output`
 # surfaces each test's captured "observed shape" evidence even when it passes,
@@ -107,8 +113,12 @@ failpoint-test: provenance
 # The drivers. Each links ONE client and speaks the parity command protocol; the
 # runner links NEITHER, so the thing deciding a verdict cannot reach for the crate
 # it is adjudicating.
+#
+# DRIVER_FEATURES= (empty) builds the Rust driver without client-rust's test probe: CI's
+# informational run at pins.toml upstream_base, which lacks it (ADR-0001).
+DRIVER_FEATURES ?= $(PROBE_FEATURES)
 drivers:
-	cargo build -p rust-driver -p parity-runner
+	cargo build -p rust-driver -p parity-runner $(DRIVER_FEATURES)
 	cd go && $(GO) build -o ../target/parity-driver-go ./driver
 
 # Run every scenario against both clients and REPORT the diff. Deliberately does not

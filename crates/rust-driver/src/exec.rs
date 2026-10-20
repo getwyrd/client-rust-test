@@ -73,7 +73,7 @@ impl Driver {
                     version: "path:../client-rust (see results/provenance.json)".to_owned(),
                     replaced: false,
                 },
-                features: vec!["scan_locks".to_owned()],
+                features: [vec!["scan_locks".to_owned()], crate::probe::features()].concat(),
                 // DECLARE THE DEVIATION. Dropping an uncommitted Transaction PANICS by
                 // default (CheckLevel::Panic), which would kill the driver mid-scenario
                 // and make `abandon` — "the crash" — unimplementable. So every txn is
@@ -277,28 +277,25 @@ impl Driver {
                 Response::observation(Observation::ok().with_locks(locks))
             }
 
-            // ── THE ASYMMETRY, STATED RATHER THAN PAPERED OVER ───────────────
-            // client-go drives 2PC one phase at a time with CommitterProbe, exported
-            // from a NON-test file. client-rust's mocks are #[cfg(test)] and vanish
-            // from the compiled crate, so there is no way to prewrite-and-stop through
-            // its public API at all.
-            //
-            // The driver does NOT emulate this. Emulating it (say, by racing a second
-            // txn to make the prewrite fail, as gate.rs::d6 must) would be exactly the
-            // "workaround for a client deficiency" the repo's governing principle
-            // forbids — and it would make the two runs incomparable, because the
-            // SETUP would no longer be held constant.
-            //
-            // So it answers `unsupported`, which is a legitimate, comparable
-            // observation. And the gap it names — client-rust exposes no importable
-            // test probes — is itself a finding worth filing: it is *why* d6 needs a
-            // region-split trick and d7 needs a compile-time failpoint to manufacture
-            // states client-go's own tests simply construct.
-            Command::PrewriteOnly { .. } => Response::observation(Observation::unsupported(
-                "client-rust exposes no test probes (its mocks are #[cfg(test)]), so a \
-                 caller cannot drive 2PC phase-by-phase. client-go exports CommitterProbe \
-                 from a non-test file. The driver does NOT emulate this: the gap is the finding.",
-            )),
+            // Drive 2PC one phase at a time through client-rust's test probe, as the
+            // Go driver does with CommitterProbe. Both drivers build the same orphan, so
+            // the setup is held constant across runs. Before the probe existed this
+            // answered `unsupported`; it still does in the upstream view (probe.rs).
+            Command::PrewriteOnly {
+                session,
+                primary,
+                keys,
+            } => match self.txns.get_mut(&session) {
+                Some(txn) => Response::observation(
+                    crate::probe::prewrite_only(
+                        txn,
+                        primary.bytes(),
+                        keys.iter().map(|k| k.bytes()).collect(),
+                    )
+                    .await,
+                ),
+                None => Response::observation(no_session(&session)),
+            },
 
             // Drop the txn WITHOUT commit or rollback — "the crash". Safe only because
             // Begin set drop_check(Warn); with the stock CheckLevel::Panic this would
