@@ -202,21 +202,21 @@ alike, and with a bridge network no single address reaches both, so isolation co
 ports, not networks. Profiles: `single`, `3store` (`chaos` arrives with the chaos tier).
 State lives in `$PARITY_BROKER_DIR` (default `~/.local/state/parity-broker`).
 
-## Gate verdict (v8.5.5 cluster, client-rust `integration` @ 4c9f361)
+## Gate verdict (v8.5.5 cluster, client-rust `integration` @ 385a1a3)
 
-> At `4c9f361` (the fork's `integration`, 2026-10-20: upstream `master` @ `1b883bf` plus
-> tikv/client-rust#558, the `test-utils` probe offered as tikv/client-rust#577, and the
-> fork's `AGENTS.md`) the gate is **all green**, `d6` and `d7` included, and the ledger
-> holds: G-0001 is FIXED and asserted to **agree**, now all-Go against all-Rust, with
-> client-rust's test probe building the orphan on the Rust side; G-0002 still diverges as
-> declared; G-0003, the mixed case (a client-go orphan read by client-rust), is FIXED and
-> agrees. The upstream view at `1b883bf` builds the Rust driver without the probe, which
-> upstream lacks, so there G-0001's Rust run is inadmissible; the rest agrees. Confirm the
-> checkout with `git -C ../client-rust describe --tags --always --dirty`. What changed
-> since the previous pin: `integration` gained the probe and the Rust driver's
-> `prewrite_only` drives it (WP-07); G-0001 moved to all-Rust and G-0003 is new.
-> Evidence: [`findings/gate-evidence-4c9f361.txt`](findings/gate-evidence-4c9f361.txt)
-> (full `make verdict` and `make ledger` output at this pin, and the upstream view).
+> At `385a1a3` (the fork's `integration`, 2026-10-25: upstream `master` @ `1b883bf` plus
+> tikv/client-rust#558, the `test-utils` probe offered as tikv/client-rust#577,
+> `RawClient::checksum` (getwyrd/client-rust#6) and CI changes; nothing fork-only) the
+> gate is **all green**, `d6` and `d7` included, and the ledger holds: G-0001 and G-0003
+> are FIXED and agree. G-0002 still diverges as declared, but at this pin that measures
+> the Rust driver, not client-rust: the driver hard-codes `unsupported` to `raw_checksum`,
+> and client-rust now has the method. Until #87 re-states it, G-0002's XDIVERGE says
+> nothing about the client, and its text (ledger, scenario, rules doc) is out of date. Confirm the checkout with
+> `git -C ../client-rust describe --tags --always --dirty`. What changed since the
+> previous pin: `integration` dropped the fork's `AGENTS.md` and gained
+> `RawClient::checksum`; no verdict and no ledger claim moved.
+> Evidence: [`findings/gate-evidence-385a1a3.txt`](findings/gate-evidence-385a1a3.txt)
+> (full `make verdict` and `make ledger` output at this pin).
 
 **Confirmed working** — the proposal's mapping is implementable as specified:
 
@@ -319,6 +319,14 @@ fixed in client-rust.
 (A fourth candidate — "`snapshot()` needs explicit `.read_only()` or drops
 panic" — did **not** survive verification: `TransactionClient::snapshot`
 applies `.read_only()` internally, client.rs:230. Retracted.)
+
+### History: the verdict at `4c9f361`
+
+> The fork's `integration` on upstream `master` @ `1b883bf` (2026-10-20), with #558, the
+> `test-utils` probe (tikv/client-rust#577) and the fork's `AGENTS.md`. The gate was
+> **all green**, and the ledger held: G-0001 FIXED and asserted to agree, now all-Go
+> against all-Rust; G-0002 diverging as declared; G-0003, the mixed case, FIXED.
+> Evidence: [`findings/gate-evidence-4c9f361.txt`](findings/gate-evidence-4c9f361.txt).
 
 ### History: the verdict at `18eff6d`
 
