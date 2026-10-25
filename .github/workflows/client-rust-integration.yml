@@ -1,0 +1,157 @@
+name: client-rust integration
+
+# client-rust's own CI, run on the fork's `integration` branch as it stands.
+#
+# A pull request into `integration` is tested merged with `integration` as it was when the
+# run started. When another pull request merges first, the combination that lands is not
+# the one any run tested. This workflow tests the combination: client-rust-pdca's
+# scripts/land starts it after each merge, and the schedule catches merges made by hand.
+#
+# It lives here, not in client-rust: client-rust's `integration` holds only changes
+# upstream can merge (client-rust-pdca ADR-0015 rule 0), and a push trigger on
+# `integration` in its workflow would be a fork-only line.
+#
+# The jobs mirror client-rust's .github/workflows/ci.yml (check, unit test, integration
+# test). When that file changes, change these to match.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+concurrency:
+  # Only the newest state of integration matters; a newer run replaces an older one.
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The fork and branch come from pins.toml, like everything else in this repo.
+  pins:
+    runs-on: ubuntu-latest
+    outputs:
+      fork: ${{ steps.p.outputs.fork }}
+      branch: ${{ steps.p.outputs.branch }}
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: p
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib, pathlib
+          r = tomllib.loads(pathlib.Path("pins.toml").read_text())["client_rust"]
+          print(f"fork={r['fork'].removeprefix('https://github.com/').removesuffix('.git')}")
+          print(f"branch={r['branch']}")
+          PY
+      # Every job tests the same commit, even when integration moves during the run.
+      - id: sha
+        run: |
+          sha=$(git ls-remote "https://github.com/${{ steps.p.outputs.fork }}.git" "refs/heads/${{ steps.p.outputs.branch }}" | cut -f1)
+          [ -n "$sha" ] || { echo "::error::${{ steps.p.outputs.branch }} not found"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "testing ${{ steps.p.outputs.fork }}@${{ steps.p.outputs.branch }} = $sha" >> "$GITHUB_STEP_SUMMARY"
+
+  check:
+    name: check
+    needs: pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.pins.outputs.fork }}
+          ref: ${{ needs.pins.outputs.sha }}
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+      - name: make check
+        run: make check
+      - name: Catch unexpected changes in the generated code
+        run: |
+          git diff --exit-code
+
+  unit-test:
+    name: unit test
+    needs: pins
+    env:
+      CARGO_INCREMENTAL: 0
+      NEXTEST_PROFILE: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.pins.outputs.fork }}
+          ref: ${{ needs.pins.outputs.sha }}
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+      - name: Install latest nextest release
+        uses: taiki-e/install-action@nextest
+      - name: unit test
+        run: make unit-test
+
+  integration-test:
+    name: integration test
+    needs: pins
+    strategy:
+      fail-fast: false
+      matrix:
+        case: ["integration-test-txn", "integration-test-raw"]
+    env:
+      CARGO_INCREMENTAL: 0
+      NEXTEST_PROFILE: ci
+      TIKV_VERSION: v8.5.5
+      RUST_LOG: info
+    runs-on: ubuntu-latest
+    # txn_cleanup_2pc_locks can hang upstream; the test step has its own limit below.
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.pins.outputs.fork }}
+          ref: ${{ needs.pins.outputs.sha }}
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+      - name: install tiup
+        run: curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
+      - name: start tiup playground
+        timeout-minutes: 10
+        run: |
+          ~/.tiup/bin/tiup install tikv:${{ env.TIKV_VERSION }} pd:${{ env.TIKV_VERSION }}
+          ~/.tiup/bin/tiup playground ${{ env.TIKV_VERSION }} --mode tikv-slim --kv 3 --tag cluster --without-monitor --kv.config config/tikv.toml --pd.config config/pd.toml &
+          while :; do
+            echo "waiting cluster to be ready"
+            [[ "$(curl -I http://127.0.0.1:2379/pd/api/v1/regions 2>/dev/null | head -n 1 | cut -d$' ' -f2)" -ne "405" ]] || break
+            sleep 1
+          done
+      - name: Install latest nextest release
+        uses: taiki-e/install-action@nextest
+      - name: Integration test
+        # A step timeout fails the step, so the log upload below still runs; a job
+        # timeout would cancel it.
+        timeout-minutes: 30
+        run: MULTI_REGION=1 make ${{ matrix.case }}
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-logs-${{ matrix.case }}
+          path: |
+            ~/.tiup/data/cluster/tikv*/*.log
+            ~/.tiup/data/cluster/pd*/*.log
