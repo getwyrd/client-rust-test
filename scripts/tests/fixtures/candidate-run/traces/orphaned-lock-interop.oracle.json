@@ -6,14 +6,14 @@
     "candidate": {
       "client_rust": {
         "contains_pin": true,
-        "digest": "d7cfd4ee9278b4b070b332bed91c5ec1ab082d07f636d90384470f9651b8833c"
+        "digest": "f7e5ee5f6b466c23b9df727f3c3b3152b95b388895dce98552f06390723b3017"
       },
       "harness": {
-        "base": "884c4652e4588a2bc3265ce9f464e9b90f63f8c6",
-        "digest": "d1a8ac0d5587f60d1deed410e2f605a204af5cb102d1fb88b632253b25d7d7e5"
+        "base": "148584a86c929e42f0a471f7b65477d4cb1a4ee5",
+        "digest": "7fd5f9c06781c3f63553bca0f4b098cb240160e2753b888b5ab012b89006ace7"
       }
     },
-    "captured_at": "2026-10-20T13:13:02Z",
+    "captured_at": "2026-10-25T22:50:14Z",
     "client_go": {
       "matches_pin": true,
       "module": "github.com/tikv/client-go/v2",
@@ -24,12 +24,12 @@
     },
     "client_rust": {
       "branch": "HEAD",
-      "describe": "0.4.0-47-g4c9f361-dirty",
+      "describe": "0.4.0-54-g385a1a3-dirty",
       "dirty": true,
       "matches_pin": false,
       "path": "../client-rust",
-      "pinned_rev": "4c9f3615c2f3aac3f4aff8387d5bed40e1532876",
-      "rev": "4c9f3615c2f3aac3f4aff8387d5bed40e1532876"
+      "pinned_rev": "385a1a37d6cf0ffe18d499bfcef0650bf9dfcc05",
+      "rev": "385a1a37d6cf0ffe18d499bfcef0650bf9dfcc05"
     },
     "cluster": {
       "matches_pin": true,
@@ -42,8 +42,8 @@
       "verified": true
     },
     "harness": {
-      "dirty": true,
-      "rev": "56cbe2873955c057e6d9c7ea023e1aa1573af8b8"
+      "dirty": false,
+      "rev": "8c34ef4fdff286cef28e221b87a6147cb9c29705"
     },
     "mode": "candidate",
     "schema": "parity-provenance/v1",
@@ -101,7 +101,7 @@
       }
     }
   ],
-  "prefix": "gate/orphaned-lock-interop/1792501982182430739/",
+  "prefix": "gate/orphaned-lock-interop/1792968614835325899/",
   "steps": [
     {
       "id": "orphaner-open",
@@ -117,7 +117,7 @@
       "op": "begin",
       "observation": {
         "class": "ok",
-        "start_ts": 469893639611613186
+        "start_ts": 470015964568092674
       }
     },
     {
@@ -134,7 +134,7 @@
       "op": "prewrite_only",
       "observation": {
         "class": "ok",
-        "start_ts": 469893639611613186
+        "start_ts": 470015964568092674
       }
     },
     {
@@ -162,16 +162,16 @@
         "locks": [
           {
             "key": {
-              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLWludGVyb3AvMTc5MjUwMTk4MjE4MjQzMDczOS96LXNlY29uZGFyeQ==",
-              "utf8": "gate/orphaned-lock-interop/1792501982182430739/z-secondary"
+              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLWludGVyb3AvMTc5Mjk2ODYxNDgzNTMyNTg5OS96LXNlY29uZGFyeQ==",
+              "utf8": "gate/orphaned-lock-interop/1792968614835325899/z-secondary"
             },
             "primary": {
-              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLWludGVyb3AvMTc5MjUwMTk4MjE4MjQzMDczOS9hLXByaW1hcnk=",
-              "utf8": "gate/orphaned-lock-interop/1792501982182430739/a-primary"
+              "b64": "Z2F0ZS9vcnBoYW5lZC1sb2NrLWludGVyb3AvMTc5Mjk2ODYxNDgzNTMyNTg5OS9hLXByaW1hcnk=",
+              "utf8": "gate/orphaned-lock-interop/1792968614835325899/a-primary"
             },
             "kind": "put",
             "ttl_ms": 1000,
-            "txn_start_ts": 469893639611613186
+            "txn_start_ts": 470015964568092674
           }
         ]
       }
