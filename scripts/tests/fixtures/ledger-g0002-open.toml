@@ -1,0 +1,42 @@
+# G-0002 as it stood while the gap was OPEN (ledger.toml at 02e2386), before #87 re-stated
+# it as an `agrees` regression guard. The script tests swap it into their scratch copy of
+# the real ledger (ledger_fixture.py), for two reasons: the recorded candidate run
+# (fixtures/candidate-run) was taken against it, and with G-0002 re-stated the real ledger
+# has no `diverges` entry left for the spec-check tests of the `diverges` rules. Never edit
+# it to follow the real ledger; it is a frozen fixture.
+
+[[gap]]
+id     = "G-0002"
+slug   = "raw-checksum-unsupported"
+kind   = "capability"
+area   = "raw.checksum"
+status = "OPEN"
+
+title = "RawKV Checksum: client-go computes a server-side crc64 over a range; client-rust has no such request"
+
+expectation = """
+Asked to checksum a raw key range, client-go answers ok (crc64_xor / total_kvs /
+total_bytes from kvrpcpb.RawChecksumRequest). client-rust exposes no raw checksum
+anywhere in its API, so its driver answers `unsupported` rather than emulating one.
+The two rows below are the complete projected difference: the class itself, and the
+`unsupported.detail` field the projection surfaces so a capability gap is legible in
+the diff rather than hidden behind a bare tag.
+"""
+
+scenario = "scenarios/raw-checksum.json"
+expect   = "diverges"
+
+roadmap = "docs/parity-roadmap.md §5.6"
+rules   = "docs/design/specs/client-rules/v1.md RAW-4"
+
+[[gap.divergence]]
+step    = "checker-checksum"
+path    = "class"
+oracle  = "ok"
+subject = "unsupported"
+
+[[gap.divergence]]
+step    = "checker-checksum"
+path    = "unsupported.detail"
+oracle  = "<step absent>"
+subject = "client-rust has no raw checksum: tikv-client implements no RawChecksum request. client-go's rawkv.Checksum returns crc64_xor/total_kvs/total_bytes computed server-side. The driver does NOT emulate it: the gap is the finding (G-0002)."

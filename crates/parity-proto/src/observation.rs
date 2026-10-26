@@ -94,8 +94,9 @@ pub struct Observation {
     /// between the two runs of one comparison. (`total_kvs` alone would compare, but
     /// one comparable field inside a non-comparable struct is a trap for a future
     /// claim author.) The claim surface for a checksum is its `class` — `ok` versus
-    /// `unsupported` IS G-0002 — and this struct is what makes the oracle's `ok`
-    /// inspectable rather than bare.
+    /// `unsupported` is G-0002 while client-rust lacks the request, and once it has it
+    /// (getwyrd/client-rust#6) `ok` on both sides is the regression guard — and this
+    /// struct is what makes each `ok` inspectable rather than bare.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checksum: Option<ChecksumObs>,
 }

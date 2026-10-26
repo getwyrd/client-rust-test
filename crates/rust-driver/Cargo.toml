@@ -34,6 +34,11 @@ tokio.workspace = true
 # tikv-client's `test-utils` feature, which this manifest cannot name: Cargo rejects the
 # reference outright against a client-rust that lacks the feature, as upstream_base does.
 # So the Makefile enables both on the command line, and CI's upstream view enables
-# neither (ADR-0001: one switch, confined to src/probe.rs).
+# neither (ADR-0001: switches are capped at two and confined to src/probe.rs).
 [features]
 test-probes = []
+# Build for a client-rust without `RawClient::checksum` (upstream `master` until
+# getwyrd/client-rust#6 is merged there): the driver answers `unsupported` to
+# raw_checksum and does not advertise it. CI's upstream-view job sets it (ADR-0001).
+# Nothing reads it until the driver calls the method (getwyrd/client-rust-test#87).
+pre-raw-checksum = []

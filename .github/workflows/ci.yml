@@ -159,10 +159,11 @@ jobs:
       # and checks the divergences against their DECLARED expectations.
       #
       # Like `verdict`, a plain pass/fail is meaningless here: each gap declares a
-      # polarity. At the current pin G-0001 is FIXED and must AGREE (a divergence fails as
-      # NEW GAP); G-0002 must diverge exactly as declared (a convergence fails as XCONVERGE,
-      # meaning the gap closed at the pin and the README and the ledger are stale).
-      - name: ledger (expect G-0001 HOLDS, G-0002 XDIVERGE)
+      # polarity. A FIXED gap must AGREE (a divergence fails as NEW GAP). An OPEN gap must
+      # diverge exactly as declared (a convergence fails as XCONVERGE, meaning the gap
+      # closed at the pin and the README and the ledger are stale). ledger.toml says which
+      # gap is which; the step name does not, so it need not change when a gap does.
+      - name: ledger (expect every gap as declared)
         run: make ledger
 
       - name: cluster logs
@@ -216,11 +217,15 @@ jobs:
         run: make cluster-up
       # upstream_base lacks client-rust's test probe, so the Rust driver builds without
       # it and answers `unsupported` to prewrite_only. Once upstream_base has the probe,
-      # drop DRIVER_FEATURES= here and the switch in rust-driver/src/probe.rs.
+      # drop the test-probes switch in rust-driver/src/probe.rs (DRIVER_FEATURES below
+      # leaves out PROBE_FEATURES, so the probe is off).
+      # upstream_base also lacks RawClient::checksum (getwyrd/client-rust#6), so the
+      # driver builds with pre-raw-checksum and answers `unsupported` to raw_checksum.
+      # Once upstream_base has the method, drop the feature here and in Cargo.toml.
       - name: driver unit tests (without the test probe)
-        run: cargo test -p rust-driver
+        run: cargo test -p rust-driver --features rust-driver/pre-raw-checksum
       - name: build the drivers (without the test probe)
-        run: make drivers DRIVER_FEATURES=
+        run: make drivers DRIVER_FEATURES="--features rust-driver/pre-raw-checksum"
       # G-0001's subject run builds its orphan with client-rust's probe, which
       # upstream_base lacks, so here it is inadmissible until upstream has the probe
       # (tikv/client-rust#577). This view is never ledger evidence, so a failing diff is
@@ -231,7 +236,7 @@ jobs:
       - name: parity diff at upstream_base (informational)
         id: upstream_parity
         continue-on-error: true
-        run: make parity DRIVER_FEATURES=
+        run: make parity DRIVER_FEATURES="--features rust-driver/pre-raw-checksum"
       - name: warn if the upstream diff failed
         if: steps.upstream_parity.outcome == 'failure'
         run: echo "::warning title=upstream view::the parity diff at upstream_base failed. Expected while upstream lacks the test probe (G-0001's Rust run is inadmissible); check the log for anything else."
