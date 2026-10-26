@@ -79,6 +79,7 @@ provenance:
 # compile-time Send/object-safety obligations (checked by building at all).
 unit-test:
 	cargo test --workspace --lib $(PROBE_FEATURES)
+	cargo test -p rust-driver --tests $(PROBE_FEATURES)
 
 # The gate proper — needs a reachable cluster ($PD_ADDRS). `--show-output`
 # surfaces each test's captured "observed shape" evidence even when it passes,
@@ -114,8 +115,9 @@ failpoint-test: provenance
 # runner links NEITHER, so the thing deciding a verdict cannot reach for the crate
 # it is adjudicating.
 #
-# DRIVER_FEATURES= (empty) builds the Rust driver without client-rust's test probe: CI's
-# informational run at pins.toml upstream_base, which lacks it (ADR-0001).
+# DRIVER_FEATURES set without $(PROBE_FEATURES) builds the Rust driver without client-rust's
+# test probe: CI's informational run at pins.toml upstream_base, which lacks it, sets
+# DRIVER_FEATURES="--features rust-driver/pre-raw-checksum" (ADR-0001).
 DRIVER_FEATURES ?= $(PROBE_FEATURES)
 drivers:
 	cargo build -p rust-driver -p parity-runner $(DRIVER_FEATURES)

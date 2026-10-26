@@ -19,6 +19,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from ledger_fixture import copy_ledger
+
 REPO = Path(__file__).resolve().parents[2]
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "candidate-run"
 DIGEST = REPO / "scripts" / "tree-digest.py"
@@ -46,8 +48,9 @@ class Scratch(unittest.TestCase):
             git(d, "init", "-q")
             git(d, "config", "user.email", "t@example.invalid")
             git(d, "config", "user.name", "t")
-        for f in ("ledger.toml", "pins.toml", "Cargo.toml", ".gitignore"):
+        for f in ("pins.toml", "Cargo.toml", ".gitignore"):
             shutil.copy(REPO / f, self.h / f)
+        copy_ledger(REPO / "ledger.toml", self.h / "ledger.toml")
         shutil.copytree(REPO / "scenarios", self.h / "scenarios")
         (self.h / "scripts").mkdir()
         for f in ("ledger-check.sh", "provenance.sh", "tree-digest.py"):

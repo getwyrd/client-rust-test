@@ -138,10 +138,12 @@ pub enum Command {
     /// computed SERVER-side (`kvrpcpb.RawChecksumRequest`).
     ///
     /// THE FIRST CAPABILITY CLAIM (G-0002). client-go implements it
-    /// (`rawkv.Checksum`); client-rust has no such request type at all and answers
-    /// `unsupported` — which is a real, comparable observation, not a failure. The
-    /// driver must NOT emulate it (scan + hash client-side would checksum different
-    /// bytes under different semantics and manufacture agreement out of a workaround).
+    /// (`rawkv.Checksum`). client-rust had no such request type until
+    /// getwyrd/client-rust#6 added `RawClient::checksum` on the fork's `integration`; a
+    /// driver whose client lacks it (upstream `master`) answers `unsupported`, which is
+    /// a real, comparable observation, not a failure. A driver must NOT emulate it (a
+    /// client-side scan and hash would checksum different bytes under different
+    /// semantics and manufacture agreement out of a workaround).
     RawChecksum {
         client: String,
         start: KeyArg,

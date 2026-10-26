@@ -2,8 +2,9 @@
 
     python3 -m unittest discover -s scripts/tests     # `make broker-test`, part of `make check`
 
-Each test copies the REAL ledger, scenarios and pins into a scratch tree, breaks one rule,
-and checks that spec-check names that rule's spec section. The per-scenario checks are the
+Each test copies the REAL ledger (G-0002 in its frozen open form: ledger_fixture.py),
+scenarios and pins into a scratch tree, breaks one rule, and checks that spec-check names
+that rule's spec section. `test_the_repository_conforms` checks the real ledger as it is. The per-scenario checks are the
 runner's (`parity-runner --check`) and are tested in crates/parity-runner.
 """
 
@@ -18,6 +19,8 @@ import tomllib
 import unittest
 from pathlib import Path
 
+from ledger_fixture import copy_ledger, with_open_g0002
+
 REPO = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location("spec_check", REPO / "scripts" / "spec-check.py")
 spec_check = importlib.util.module_from_spec(_spec)
@@ -28,12 +31,15 @@ class SpecCheck(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="spec-check-test-"))
         self.addCleanup(shutil.rmtree, self.root)
-        for f in ("ledger.toml", "pins.toml", "crates/parity-proto/src/project.rs"):
+        for f in ("pins.toml", "crates/parity-proto/src/project.rs"):
             (self.root / f).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(REPO / f, self.root / f)
+        copy_ledger(REPO / "ledger.toml", self.root / "ledger.toml")
         shutil.copytree(REPO / "scenarios", self.root / "scenarios")
-        # Every file the ledger refers to, so the existence check has something to find.
-        for gap in tomllib.loads((REPO / "ledger.toml").read_text())["gap"]:
+        # Every file either ledger refers to (the real one, and the scratch copy with G-0002
+        # open), so the existence check has something to find.
+        real = (REPO / "ledger.toml").read_text()
+        for gap in [*tomllib.loads(real)["gap"], *tomllib.loads(with_open_g0002(real))["gap"]]:
             for key in ("finding", "roadmap", "rules"):
                 if key in gap:
                     rel = gap[key].split(" ", 1)[0]
