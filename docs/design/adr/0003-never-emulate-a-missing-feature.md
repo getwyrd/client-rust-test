@@ -17,6 +17,12 @@ make the two agree by scanning the range and hashing it client-side. That would 
 different bytes, under different semantics, with different cost, and the diff would come
 out clean. The harness would then report parity for a capability client-rust does not have.
 
+*(Note, 2026-10-26: the example closed as designed — getwyrd/client-rust#6 added
+`RawClient::checksum` on the fork's `integration` branch, the Rust driver calls it, and
+G-0002 is re-stated as an `agrees` regression guard. The context above is kept as written;
+the upstream view, whose client-rust still lacks the method, keeps answering
+`unsupported`.)*
+
 The same temptation exists for `LockNoWait`, fair locking, `CommitterProbe`, and every
 future gap.
 

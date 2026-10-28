@@ -52,7 +52,10 @@ fertile ground, and this document is written so §2 can seed the answer to #506.
   Scan/ReverseScan (+key-only variants), CompareAndSwap (`raw/client.rs:684`), TTL
   (`raw/client.rs:300,332`), atomic-CAS mode (`:204`), column families (`:157`). Only
   `RawChecksum` is missing (§5.6), plus the V1TTL api-version mode. Rust even carries a
-  raw coprocessor endpoint client-go lacks (`raw/client.rs:707`).
+  raw coprocessor endpoint client-go lacks (`raw/client.rs:707`). *(Note, 2026-10-26:
+  `RawChecksum` is present on the fork's `integration` branch since getwyrd/client-rust#6
+  — `RawClient::checksum`, pinned from 385a1a3 — and absent from upstream `master`; the
+  verdict above is this document's snapshot at `e53837d`.)*
 - **Keyspace / API v2** is genuine parity: `request/keyspace.rs` codecs are wired into
   both raw and txn paths (`raw/client.rs:236`, `transaction/transaction.rs:139`).
 - **TSO batching** exists (`pd/timestamp.rs:37`, batch ≤ 64) with PD leader failover
@@ -280,7 +283,10 @@ absent from `store/request.rs:75-86`). Single request type.
 Verify: **landed** — `scenarios/raw-checksum.json` + ledger **G-0002**, the canonical
 capability claim (`expect = "diverges"`, `class: oracle=ok / subject=unsupported`,
 declared field-complete with its `unsupported.detail` row). Flips to XCONVERGE the day
-client-rust gains the request.
+client-rust gains the request. *(Note, 2026-10-26: it did, on the fork — getwyrd/client-rust#6
+added `RawClient::checksum` on `integration`, pinned from 385a1a3 — and G-0002 is re-stated
+as an `expect = "agrees"` regression guard; upstream `master` still lacks the request, so
+this section's verdict stands at the snapshot's pin `e53837d`.)*
 
 **5.7 Read-path lock resolution parity.** Re-enable resolve-lock-lite (`requests.rs:229`
 pins `txn_size = MAX` with a "currently disabled" comment; oracle threshold at

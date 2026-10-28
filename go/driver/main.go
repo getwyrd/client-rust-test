@@ -146,8 +146,9 @@ func hello() *Hello {
 		// prewrite_only is THE capability that makes this driver the state factory:
 		// client-go exports CommitterProbe from a non-test file, so an external
 		// module can drive 2PC one phase at a time. client-rust has no equivalent.
-		// raw_checksum is the capability G-0002 measures: client-go serves it,
-		// client-rust answers `unsupported`.
+		// raw_checksum is the capability G-0002 measured: client-go serves it, and
+		// client-rust answered `unsupported` until getwyrd/client-rust#6; now both
+		// drivers list it and the entry guards against losing it again.
 		Features: []string{"prewrite_only", "scan_locks", "raw_checksum"},
 		// DECLARE EVERY DEVIATION FROM A STOCK CLIENT. It lands in the trace, and
 		// from there in the evidence — rather than in a code comment nobody reads six

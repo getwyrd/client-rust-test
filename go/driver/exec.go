@@ -302,11 +302,13 @@ func (d *Driver) Execute(cmd Command) Response {
 
 	case "raw_checksum":
 		// THE ORACLE'S HALF OF G-0002. Server-side crc64 over [start, end)
-		// (kvrpcpb.RawChecksumRequest). client-rust has no such request and its
-		// driver answers `unsupported` — `ok` versus `unsupported` IS the claim.
-		// The numbers ride along as EVIDENCE ONLY: crc64/total_bytes cover the key
-		// bytes, prefix included, so they legitimately differ between the two runs
-		// of one comparison and are never projected (see parity-proto).
+		// (kvrpcpb.RawChecksumRequest). client-rust had no such request and its
+		// driver answered `unsupported` — `ok` versus `unsupported` WAS the claim.
+		// Since getwyrd/client-rust#6 the Rust driver calls RawClient::checksum and
+		// G-0002 is a regression guard: `ok` on both sides. The numbers ride along
+		// as EVIDENCE ONLY: crc64/total_bytes cover the key bytes, prefix included,
+		// so they legitimately differ between the two runs of one comparison and
+		// are never projected (see parity-proto).
 		cli, found := d.rawClients[cmd.Client]
 		if !found {
 			return Response{Observation: driverError("raw_checksum: no such raw client " + cmd.Client)}

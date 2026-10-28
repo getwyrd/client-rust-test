@@ -103,60 +103,74 @@ finding        = "findings/txn-not-found-lock-resolution.md"
 # locks.count, locks at e53837d) are in the git history of this file.
 
 # ══════════════════════════════════════════════════════════════════════════════════════
-# G-0002 — RawKV Checksum does not exist in client-rust.
+# G-0002 — RawKV Checksum did not exist in client-rust.  FIXED on the fork — now a
+# regression guard.
 #
-# THE FIRST CAPABILITY CLAIM: the gap is not misbehaviour, it is ABSENCE. client-go
+# THE FIRST CAPABILITY CLAIM: the gap was not misbehaviour, it was ABSENCE. client-go
 # serves rawkv.Checksum (a server-side crc64 over a range, kvrpcpb.RawChecksumRequest);
-# client-rust has no such request type in its plan layer at all (rules doc RAW-4;
-# roadmap §5.6). The subject's driver answers `unsupported` — a first-class, comparable
-# observation — and MUST NOT emulate the feature: a client-side scan-and-hash would
-# checksum different bytes under different semantics and manufacture agreement out of a
-# workaround.
+# client-rust had no such request type in its plan layer at all (rules doc RAW-4;
+# roadmap §5.6) until getwyrd/client-rust#6 added `RawClient::checksum` on the fork's
+# `integration` branch, pinned from 385a1a3. The subject's driver now calls it and the two
+# clients AGREE, so this entry asserts that they keep agreeing. While the method was
+# missing the driver answered `unsupported` — a first-class, comparable observation —
+# and did NOT emulate the feature (a client-side scan-and-hash would checksum different
+# bytes under different semantics and manufacture agreement out of a workaround); it
+# still does not (ADR-0003), and the upstream view, whose client-rust lacks the method,
+# still answers `unsupported` there (rust-driver/src/probe.rs, ADR-0001).
 #
-# The oracle's checksum numbers (crc64_xor / total_kvs / total_bytes) are in its trace
-# as EVIDENCE ONLY — they cover the key bytes, run prefix included, so they legitimately
-# differ between the two runs of this comparison and are never projected. The claim
-# surface is the class, plus the detail the projection surfaces for any `unsupported`.
+# The checksum numbers (crc64_xor / total_kvs / total_bytes) are in BOTH traces as
+# EVIDENCE ONLY — they cover the key bytes, run prefix included, so they legitimately
+# differ between the two runs of this comparison and are never projected.
 #
-# Not filed upstream yet — roadmap §9 queues the filing; this entry gets the issue URL
-# when it exists. The day client-rust gains raw checksum, XCONVERGE fires and this entry
-# is re-stated as an `expect = "agrees"` regression guard.
+# Not offered upstream: tikv/client-rust master lacks the method, so no `upstream_pr` is
+# named here until a PR exists (ADR-0001 reserves the key for the still-open upstream
+# PR), and no upstream issue was filed before #6 landed.
 # ══════════════════════════════════════════════════════════════════════════════════════
 [[gap]]
 id     = "G-0002"
 slug   = "raw-checksum-unsupported"
 kind   = "capability"
 area   = "raw.checksum"
-status = "OPEN"
+status = "FIXED"
 
-title = "RawKV Checksum: client-go computes a server-side crc64 over a range; client-rust has no such request"
+title = "RawKV Checksum: client-go computes a server-side crc64 over a range; client-rust sends the same request since getwyrd/client-rust#6"
 
 expectation = """
-Asked to checksum a raw key range, client-go answers ok (crc64_xor / total_kvs /
-total_bytes from kvrpcpb.RawChecksumRequest). client-rust exposes no raw checksum
-anywhere in its API, so its driver answers `unsupported` rather than emulating one.
-The two rows below are the complete projected difference: the class itself, and the
-`unsupported.detail` field the projection surfaces so a capability gap is legible in
-the diff rather than hidden behind a bare tag.
+Asked to checksum a raw key range, both clients answer ok, each carrying the crc64_xor /
+total_kvs / total_bytes that TiKV computed for kvrpcpb.RawChecksumRequest.
+
+Until getwyrd/client-rust#6, client-rust exposed no raw checksum anywhere in its API, so
+its driver answered `unsupported` rather than emulating one, and this entry declared that
+divergence field by field (class, and the `unsupported.detail` the projection surfaces).
+#6 added `RawClient::checksum` (src/raw/client.rs) on the fork's `integration` branch;
+at the pin 385a1a3 the Rust driver calls it and both sides answer `ok`.
 """
 
 scenario = "scenarios/raw-checksum.json"
-expect   = "diverges"
+expect   = "agrees"
 
 roadmap = "docs/parity-roadmap.md §5.6"
 rules   = "docs/design/specs/client-rules/v1.md RAW-4"
 
-[[gap.divergence]]
-step    = "checker-checksum"
-path    = "class"
-oracle  = "ok"
-subject = "unsupported"
-
-[[gap.divergence]]
-step    = "checker-checksum"
-path    = "unsupported.detail"
-oracle  = "<step absent>"
-subject = "client-rust has no raw checksum: tikv-client implements no RawChecksum request. client-go's rawkv.Checksum returns crc64_xor/total_kvs/total_bytes computed server-side. The driver does NOT emulate it: the gap is the finding (G-0002)."
+# ─── What this `agrees` claim compares. Any divergence on these is a NEW GAP.
+#
+# Every step's projection compares `class` (and `class.parts` for a mixed class,
+# `unsupported.detail` for an unsupported one), `value`, `commit_ts` (whether present),
+# `locks.count`, `locks` (each as key, primary, kind and a TTL bucket), `proto.present`
+# and, when a proto is present, `proto.type` (crates/parity-proto/src/project.rs); the
+# scenario opts nothing else in (no `also_compare`). So a regression that loses the
+# capability — the subject answers `unsupported` again, or its call errors where the
+# oracle's succeeds — diverges on class and fails loudly.
+#
+# Known limit (getwyrd/client-rust-test#89): this guard compares the CLASS ONLY. The
+# checksum numbers are never projected (crc64_xor and total_bytes differ between the two
+# runs by design, and the projection has no path for `total_kvs` yet), so a subject that
+# answered `ok` without asking TiKV, or asked it over the wrong range, would HOLD here.
+# Until #89 lands, a HOLDS proves the class agrees; the numbers in the trace are what a
+# human reads to see that the request really ran over the seeded keys.
+#
+# The open gap's two divergence rows (class, unsupported.detail; last at 65e5d9c) are in
+# the git history of this file.
 
 [[gap]]
 id     = "G-0003"
