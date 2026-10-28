@@ -327,21 +327,28 @@ impl Driver {
                 ))),
             },
 
-            // ── THE SECOND STATED ASYMMETRY (G-0002) ─────────────────────────
+            // ── G-0002, NOW A REGRESSION GUARD ───────────────────────────────
             // client-go serves `rawkv.Checksum` — a SERVER-side crc64 over the range
-            // (`kvrpcpb.RawChecksumRequest`). client-rust has no such request type in
-            // its plan layer at all (rules doc RAW-4; roadmap §5.6).
+            // (`kvrpcpb.RawChecksumRequest`). client-rust had no such request type in
+            // its plan layer until getwyrd/client-rust#6 added `RawClient::checksum`
+            // (fork `integration`, pinned from 385a1a3); this arm calls it, so both
+            // drivers answer `ok` and the ledger entry guards against losing it again.
             //
-            // The driver does NOT emulate it. A scan-and-hash would checksum
-            // different bytes under different semantics (client-side, racing writes,
-            // no total_bytes accounting) and manufacture agreement out of a
-            // workaround — `unsupported` is the honest, comparable answer.
-            Command::RawChecksum { .. } => Response::observation(Observation::unsupported(
-                "client-rust has no raw checksum: tikv-client implements no RawChecksum \
-                 request. client-go's rawkv.Checksum returns crc64_xor/total_kvs/\
-                 total_bytes computed server-side. The driver does NOT emulate it: the \
-                 gap is the finding (G-0002).",
-            )),
+            // The driver did NOT emulate it while it was missing (a scan-and-hash would
+            // checksum different bytes under different semantics and manufacture
+            // agreement out of a workaround), and it does not now: upstream `master`
+            // still lacks the method, so the call sits behind a switch in probe.rs and
+            // the upstream view answers `unsupported` with no request sent. The lookup
+            // comes first in both builds: an unknown client is a harness fault
+            // (`driver_error`, parity-protocol v1 §4.3 rule 4), never `unsupported`.
+            Command::RawChecksum { client, start, end } => match self.raw_clients.get(&client) {
+                Some(c) => Response::observation(
+                    crate::probe::raw_checksum(c, start.bytes(), end.bytes()).await,
+                ),
+                None => Response::observation(Observation::driver_error(format!(
+                    "raw_checksum: no such raw client {client}"
+                ))),
+            },
         }
     }
 }
