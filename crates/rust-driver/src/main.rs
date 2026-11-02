@@ -12,7 +12,7 @@
 //! FAULT INJECTION IS ABSENT ON PURPOSE. There is no `failpoints` feature here: this
 //! binary's whole job is to observe an UNMODIFIED client, and `cargo build --workspace`
 //! must never unify `fail/failpoints` into the tikv-client it links. (See
-//! crates/wyrd-gate/Cargo.toml, where the feature is opt-in for exactly this reason.)
+//! crates/parity-gate/Cargo.toml, where the feature is opt-in for exactly this reason.)
 
 mod exec;
 mod mapping;

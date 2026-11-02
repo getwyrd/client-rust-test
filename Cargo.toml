@@ -7,9 +7,10 @@
 #   harness    client-agnostic fixtures: $PD_ADDRS, PD ground truth for region
 #              layout, deterministic byte corpora. Anything a suite OR a future
 #              differential runner needs, and that says nothing about wyrd.
-#   wyrd-gate  the M4 evaluation gate — an application-contract suite driven over
-#              tikv-client. It was once the whole repo; it is now one suite among
-#              the ones to come, and the template for them.
+#   parity-gate  the cluster-backed gate — an application-contract suite (wyrd's M4
+#              evaluation gate originally) driven over tikv-client. It was once the
+#              whole repo; it is now one suite among the ones to come, and the
+#              template for them.
 #
 # The crate under test is a PATH dependency on the sibling checkout, deliberately:
 # pointing the harness at a local branch to prove a fix is the entire point of the
@@ -50,5 +51,5 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 
 # Fault injection. Deliberately WITHOUT the `failpoints` feature here — see
-# crates/wyrd-gate/Cargo.toml, where it is opt-in.
+# crates/parity-gate/Cargo.toml, where it is opt-in.
 fail = "0.4"

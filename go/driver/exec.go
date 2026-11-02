@@ -126,7 +126,7 @@ func pdAddrs() []string {
 // difference that is about PD versions rather than about either client.
 //
 // WHY NOT JUST BUMP THE CLUSTER. Because the cluster pin is load-bearing elsewhere:
-// the wyrd-gate's entire verdict is stated against v8.5.5, and bumping it would
+// the parity-gate's entire verdict is stated against v8.5.5, and bumping it would
 // re-state every one of those claims. That is a deliberate, reviewed change, not
 // something to do in passing to make a new driver start up.
 //

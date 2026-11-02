@@ -4,7 +4,7 @@
 # to observe an UNMODIFIED client. Compiled-in failpoints are inert until configured,
 # so linking them would be contamination rather than a live bug — which is exactly the
 # kind of thing that quietly makes a result untrustworthy months later, when nobody
-# remembers why. See crates/wyrd-gate/Cargo.toml, where the feature is opt-in for the
+# remembers why. See crates/parity-gate/Cargo.toml, where the feature is opt-in for the
 # same reason.
 [package]
 name = "rust-driver"
