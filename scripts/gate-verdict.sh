@@ -62,7 +62,7 @@ for bin in gate failpoint_gate; do
   done
   echo "═══ $bin: the tests expected to pass ═══"
   # shellcheck disable=SC2046
-  if cargo test -p wyrd-gate --features "$(features_for "$bin")" --test "$bin" -- --show-output \
+  if cargo test -p parity-gate --features "$(features_for "$bin")" --test "$bin" -- --show-output \
        $(flags_for "$bin") "${skips[@]}"; then
     echo "OK: $bin is green apart from its expected-red tests."
   else
@@ -79,7 +79,7 @@ for row in "${XFAIL[@]}"; do
   echo "    expected red — $why"
   out=$(mktemp)
   # shellcheck disable=SC2046
-  cargo test -p wyrd-gate --features "$(features_for "$bin")" --test "$bin" -- --show-output \
+  cargo test -p parity-gate --features "$(features_for "$bin")" --test "$bin" -- --show-output \
        $(flags_for "$bin") --exact "$test" >"$out" 2>&1
   status=$?
   cat "$out"

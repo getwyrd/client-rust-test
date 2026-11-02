@@ -44,7 +44,7 @@ PROBE_FEATURES := --features $(PROBE_FEATURE_LIST)
 
 # --all-features would switch on `failpoints` for the whole workspace, compiling
 # fault injection into every member. Name the features instead.
-CARGO_FEATURES := --features wyrd-gate/integration-tests,wyrd-gate/failpoints,$(PROBE_FEATURE_LIST)
+CARGO_FEATURES := --features parity-gate/integration-tests,parity-gate/failpoints,$(PROBE_FEATURE_LIST)
 
 check: pins-check spec-check go-check broker-test
 	cargo fmt --all -- --check
@@ -85,7 +85,7 @@ unit-test:
 # surfaces each test's captured "observed shape" evidence even when it passes,
 # so the one-shot run records the raw error shapes the findings cite.
 gate-test: provenance
-	cargo test -p wyrd-gate --features integration-tests --test gate -- --show-output
+	cargo test -p parity-gate --features integration-tests --test gate -- --show-output
 
 # Both suites, checked against the verdict EXPECTED at the pinned revision: every test
 # green except those declared expected-red in scripts/gate-verdict.sh's XFAIL table.
@@ -107,7 +107,7 @@ verdict: provenance
 # Separate binary, single-threaded: the `after-prewrite` failpoint is
 # process-global, so it must not run alongside `gate`'s parallel commits.
 failpoint-test: provenance
-	cargo test -p wyrd-gate --features integration-tests,failpoints --test failpoint_gate -- \
+	cargo test -p parity-gate --features integration-tests,failpoints --test failpoint_gate -- \
 	    --show-output --test-threads=1
 
 # ─── THE PARITY MECHANISM ────────────────────────────────────────────────────

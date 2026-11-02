@@ -8,11 +8,11 @@
 #![allow(dead_code)]
 
 use harness::pd_addrs;
-use wyrd_gate::traits::CommitOutcome;
-use wyrd_gate::traits::MetadataStore;
-use wyrd_gate::traits::WriteBatch;
-use wyrd_gate::LockMode;
-use wyrd_gate::TikvMetadataStore;
+use parity_gate::traits::CommitOutcome;
+use parity_gate::traits::MetadataStore;
+use parity_gate::traits::WriteBatch;
+use parity_gate::LockMode;
+use parity_gate::TikvMetadataStore;
 
 /// Connect a store in `mode`, panicking with a usable hint if the cluster is
 /// not reachable.

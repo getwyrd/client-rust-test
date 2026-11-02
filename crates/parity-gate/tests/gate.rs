@@ -26,16 +26,16 @@ use common::store;
 use common::wipe;
 use harness::deterministic_bytes;
 use harness::key;
+use parity_gate::is_lost_race;
+use parity_gate::traits::CommitOutcome;
+use parity_gate::traits::MetadataStore;
+use parity_gate::traits::WriteBatch;
+use parity_gate::LockMode;
+use parity_gate::SCAN_PAGE;
 use tikv_client::CheckLevel;
 use tikv_client::TransactionClient;
 use tikv_client::TransactionOptions;
 use tokio::sync::Barrier;
-use wyrd_gate::is_lost_race;
-use wyrd_gate::traits::CommitOutcome;
-use wyrd_gate::traits::MetadataStore;
-use wyrd_gate::traits::WriteBatch;
-use wyrd_gate::LockMode;
-use wyrd_gate::SCAN_PAGE;
 
 fn val(s: &str) -> Bytes {
     Bytes::copy_from_slice(s.as_bytes())
@@ -437,7 +437,7 @@ async fn b3_file_commit_is_a_version_cas() {
 /// Race `tasks` concurrent commits of `make_batch(i)` from a barrier; return
 /// (committed tags, conflicts, faults).
 async fn race(
-    store: &wyrd_gate::TikvMetadataStore,
+    store: &parity_gate::TikvMetadataStore,
     tasks: usize,
     make_batch: impl Fn(usize) -> WriteBatch,
 ) -> (Vec<usize>, usize, Vec<String>) {
@@ -1146,7 +1146,7 @@ async fn d6_orphaned_lock_must_be_resolved_by_client_rust() {
     // Manufacture the orphan: an optimistic txn locks the primary and puts the
     // secondary, the primary is invalidated by a racing commit so the orphaner
     // loses at prewrite, and it is dropped WITHOUT rollback — a crash.
-    let upper = wyrd_gate::prefix_upper_bound(prefix).expect("bounded prefix");
+    let upper = parity_gate::prefix_upper_bound(prefix).expect("bounded prefix");
     let mut orphan = None;
     for round in 0..4u32 {
         // Re-establish the precondition on EVERY attempt, not once up front.

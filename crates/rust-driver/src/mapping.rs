@@ -85,7 +85,7 @@ fn classify_inner(err: &Error) -> (Class, Option<serde_json::Value>) {
 
         // The pessimistic-lock wrapper. The inner error is the fact; unwrap it, or a
         // write conflict surfaced through a lock request would be unclassifiable —
-        // which is precisely what `is_lost_race` in wyrd-gate has to cope with.
+        // which is precisely what `is_lost_race` in parity-gate has to cope with.
         Error::PessimisticLockError { inner, .. } => classify_inner(inner),
 
         // ── Undetermined: the commit MAY have landed ─────────────────────────

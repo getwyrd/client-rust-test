@@ -5,11 +5,11 @@
 *                       @eduralph
 
 # The vendored MetadataStore contract and its TiKV mapping — the load-bearing
-# surface the wyrd-gate suite verifies. Changes here need a deliberate look.
-/crates/wyrd-gate/src/  @eduralph
+# surface the parity-gate suite verifies. Changes here need a deliberate look.
+/crates/parity-gate/src/  @eduralph
 
 # The suites and findings are the harness's output; guard their integrity.
-/crates/wyrd-gate/tests/ @eduralph
+/crates/parity-gate/tests/ @eduralph
 /findings/              @eduralph
 
 # Client-agnostic fixtures: PD ground truth, cluster preconditions. Every suite

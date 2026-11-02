@@ -7,7 +7,7 @@
 //! layout — none of them should have to agree on a `MetadataStore` to get it.
 //!
 //! Anything that speaks in terms of a specific contract (a store, a `WriteBatch`)
-//! belongs to that suite, not here. See `crates/wyrd-gate/tests/common/mod.rs`.
+//! belongs to that suite, not here. See `crates/parity-gate/tests/common/mod.rs`.
 
 /// PD's HTTP API as ground truth for the cluster's region layout.
 pub mod cluster;

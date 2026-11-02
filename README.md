@@ -23,20 +23,20 @@ requires an *evaluation gate* before the dependency is committed:
 - confirm the **multi-key atomic `commit(WriteBatch)`** mapping holds under
   real contention.
 
-The gate lives in the `wyrd-gate` crate — one suite in this workspace, and the
+The gate lives in the `parity-gate` crate — one suite in this workspace, and the
 template for the client-parity suites to come:
 
-- [`crates/wyrd-gate/src/traits.rs`](crates/wyrd-gate/src/traits.rs) — the
+- [`crates/parity-gate/src/traits.rs`](crates/parity-gate/src/traits.rs) — the
   `MetadataStore` contract, **vendored verbatim** from wyrd
   (`crates/traits/src/lib.rs` @ 7009c2e). Copied, not depended on, so the harness
   stays standalone; M4's premise is that this surface is frozen, and any needed
   re-copy would itself be a gate finding.
-- [`crates/wyrd-gate/src/lib.rs`](crates/wyrd-gate/src/lib.rs) —
+- [`crates/parity-gate/src/lib.rs`](crates/parity-gate/src/lib.rs) —
   `TikvMetadataStore`, the exact `WriteBatch → one TiKV transaction` translation
   the future `metadata-tikv` crate will use: pessimistic `get_for_update` by
   default, optimistic + `lock_keys` as the measured alternative, write-conflict →
   `Ok(Conflict)` classification, paged native prefix scan, rollback discipline.
-- [`crates/wyrd-gate/tests/gate.rs`](crates/wyrd-gate/tests/gate.rs) — the gate
+- [`crates/parity-gate/tests/gate.rs`](crates/parity-gate/tests/gate.rs) — the gate
   proper; every test names the proposal obligation it verifies.
 - [`crates/harness`](crates/harness) — client-agnostic fixtures: `$PD_ADDRS`, and
   PD's region layout as ground truth, so the gate's cross-region obligations are
@@ -107,7 +107,7 @@ wyrd/
 └── client-rust-test/   # this harness
     ├── crates/
     │   ├── harness/        # client-agnostic: $PD_ADDRS, PD region ground truth
-    │   ├── wyrd-gate/      # the M4 evaluation gate (one suite among those to come)
+    │   ├── parity-gate/    # the M4 evaluation gate (one suite among those to come)
     │   ├── parity-proto/   # the protocol + observation schema. NO client deps.
     │   ├── rust-driver/    # drives tikv-client  (the subject)
     │   └── parity-runner/  # the comparator. Links NEITHER client, on purpose.
