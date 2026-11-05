@@ -12,6 +12,9 @@
 /// PD's HTTP API as ground truth for the cluster's region layout.
 pub mod cluster;
 
+/// The wait for TiKV to split a written range, with every commit in it time-limited.
+pub mod split_wait;
+
 use std::env;
 
 /// The cluster under test. Comma-separated, matching client-rust's own

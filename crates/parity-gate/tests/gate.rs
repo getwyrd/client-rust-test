@@ -90,10 +90,6 @@ async fn p0_cluster_can_split_regions() {
         }
         batch
     };
-    assert_eq!(
-        store.commit(seed()).await.expect("seed"),
-        CommitOutcome::Committed
-    );
 
     // Deliberately waits for TiKV's OWN split checker rather than asking PD to
     // split at a key (which is what cluster::ensure_cross_region does when a test
@@ -108,53 +104,39 @@ async fn p0_cluster_can_split_regions() {
     // not split for over a minute; TiKV appears not to re-check it until a new write
     // reaches it. Re-writing is still a plain write: the split it leads to is TiKV's
     // own, so this proves as much about cluster/tikv.toml as the first write does.
-    let wait = Duration::from_secs(90);
-    let rewrite_every = Duration::from_secs(10);
-    let deadline = std::time::Instant::now() + wait;
-    let mut next_rewrite = std::time::Instant::now() + rewrite_every;
-    let mut rewrites = 0;
+    //
+    // The 90 s covers the seed commit too, and each commit is limited to what remains of
+    // it: a commit that stalls must not keep the wait from reaching its deadline.
+    let wait = harness::split_wait::SplitWait {
+        keys: 200,
+        limit: Duration::from_secs(90),
+        rewrite_every: Duration::from_secs(10),
+        poll: Duration::from_millis(500),
+    };
     let lo = key(prefix, "k/0000");
     let hi = key(prefix, "k/0199");
-    loop {
-        // Both keys located in ONE PD snapshot: two separate lookups could
-        // straddle a split/merge and report a boundary that never existed.
-        if harness::cluster::are_cross_region(&lo, &hi).await {
-            break;
-        }
-        if std::time::Instant::now() >= deadline {
-            let now = harness::cluster::region_count().await;
-            // A growing count does not prove cluster/tikv.toml is in force: other tests
-            // ask PD for explicit splits. It only tells the two likely causes apart.
-            let cause = if now > before {
-                format!(
-                    "the cluster has {now} regions (was {before}), so regions are being \
-                     created, but this range has not split yet. Most likely the split checker \
-                     has not checked it even after the re-writes; if this repeats, check that cluster/tikv.toml \
-                     is mounted (region-max-keys = 10)"
-                )
-            } else {
-                format!(
-                    "no region has split at all ({now} regions, was {before}): check that \
-                     cluster/tikv.toml is mounted (region-max-keys = 10)"
-                )
-            };
-            panic!(
-                "PRECONDITION FAILED: 200 keys did not split across regions within {}s \
-                 ({rewrites} re-writes): {cause}. The gate's multi-region obligations are \
-                 VOID without splits.",
-                wait.as_secs()
+    let rewrites = harness::split_wait::wait_for_split(
+        &wait,
+        before,
+        async {
+            assert_eq!(
+                store.commit(seed()).await.expect("seed"),
+                CommitOutcome::Committed
             );
-        }
-        if std::time::Instant::now() >= next_rewrite {
+        },
+        || async {
             assert_eq!(
                 store.commit(seed()).await.expect("re-write"),
                 CommitOutcome::Committed
             );
-            rewrites += 1;
-            next_rewrite = std::time::Instant::now() + rewrite_every;
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
+        },
+        // Both keys located in ONE PD snapshot: two separate lookups could
+        // straddle a split/merge and report a boundary that never existed.
+        || harness::cluster::are_cross_region(&lo, &hi),
+        harness::cluster::region_count,
+    )
+    .await
+    .unwrap_or_else(|message| panic!("{message}"));
 
     println!(
         "cluster splits regions: {} -> {} regions ({rewrites} re-writes), stores Up {up:?}",
