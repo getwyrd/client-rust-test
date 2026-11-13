@@ -389,7 +389,7 @@ checkout, which a checked-out branch could rewrite (the guard refuses that setup
 
 ```sh
 git show refs/remotes/origin/HEAD:.githooks/pre-push > .git/hooks/pre-push && chmod +x .git/hooks/pre-push
-s=$(git show refs/remotes/origin/HEAD:.secret-guard/activate.sh) && sh -c "$s" activate
+s=$(PATH=/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin git show refs/remotes/origin/HEAD:.secret-guard/activate.sh) && /bin/sh -c "$s" activate
 ```
 
 Re-run both after either changes on `main`; bypass a hook with `--no-verify`.
