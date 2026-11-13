@@ -40,3 +40,7 @@ go/go.work.sum
 # Python bytecode (scripts/tests, scripts/cluster-broker): never tracked — a stale cache
 # would make the harness look modified and ledger-check refuse its evidence.
 __pycache__/
+
+# Claude Code machine-local files: may hold recorded commands with secrets; never commit
+**/.claude/settings.local.json*
+CLAUDE.local.md

@@ -381,8 +381,10 @@ applies `.read_only()` internally, client.rs:230. Retracted.)
 ## Contributing
 
 `main` is protected: changes land via pull request (force-push and deletion
-are blocked, linear history required). Enable the version-controlled pre-push
-hook once per clone so `make check` runs before anything leaves your machine:
+are blocked, linear history required). Enable the version-controlled
+hooks once per clone so `make check` runs before anything leaves your machine and
+the secret guard (`.pre-commit-config.yaml`, needs `pipx install pre-commit`) runs on
+every commit:
 
 ```sh
 git config core.hooksPath .githooks   # runs make check on push; bypass with --no-verify
