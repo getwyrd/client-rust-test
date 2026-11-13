@@ -381,14 +381,18 @@ applies `.read_only()` internally, client.rs:230. Retracted.)
 ## Contributing
 
 `main` is protected: changes land via pull request (force-push and deletion
-are blocked, linear history required). Enable the version-controlled
-hooks once per clone so `make check` runs before anything leaves your machine and
-the secret guard (`.pre-commit-config.yaml`, needs `pipx install pre-commit`) runs on
-every commit:
+are blocked, linear history required). Once per clone, install the pre-push hook so
+`make check` runs before anything leaves your machine, and activate the secret guard
+(`.pre-commit-config.yaml`, needs `pipx install pre-commit==4.7.0`). Install the hook by
+copying the reviewed version from `main` rather than pointing `core.hooksPath` at the
+checkout, which a checked-out branch could rewrite (the guard refuses that setup):
 
 ```sh
-git config core.hooksPath .githooks   # runs make check on push; bypass with --no-verify
+git show refs/remotes/origin/HEAD:.githooks/pre-push > .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+s=$(PATH=/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin git show refs/remotes/origin/HEAD:.secret-guard/activate.sh) && /bin/sh -c "$s" activate
 ```
+
+Re-run both after either changes on `main`; bypass a hook with `--no-verify`.
 
 ## License
 
