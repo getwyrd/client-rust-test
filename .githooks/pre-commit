@@ -9,10 +9,11 @@ if ! command -v pre-commit >/dev/null 2>&1; then
 fi
 # Read a copy of the config taken from the default branch, not the checked-out file, so a
 # branch (a fork PR checked out locally) cannot redefine what runs on commit.
+# The copies (and the pinned gitleaks policy) come from: git show origin/HEAD:.secret-guard/activate.sh | sh
 d=$(git rev-parse --path-format=absolute --git-common-dir)
-if [ ! -f "$d/secret-guard.yaml" ]; then
-    echo "pre-commit: no reviewed config copy; run:" >&2
-    echo "  git show origin/HEAD:.pre-commit-config.yaml > $d/secret-guard.yaml" >&2
+if [ ! -f "$d/secret-guard.yaml" ] || [ ! -f "$d/secret-guard-gitleaks.toml" ]; then
+    echo "pre-commit: secret guard not activated; run:" >&2
+    echo "  git show origin/HEAD:.secret-guard/activate.sh | sh" >&2
     exit 1
 fi
-exec pre-commit run --config "$d/secret-guard.yaml" --hook-stage pre-commit
+GITLEAKS_CONFIG="$d/secret-guard-gitleaks.toml" exec pre-commit run --config "$d/secret-guard.yaml" --hook-stage pre-commit
