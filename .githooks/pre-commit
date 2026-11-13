@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 # Secret guard for client-rust-test. core.hooksPath=.githooks bypasses the hook that
-# `pre-commit install` would write to .git/hooks, so run .pre-commit-config.yaml here.
+# `pre-commit install` would write to .git/hooks, so run the secret guard here.
 # Fails closed: without pre-commit the commit is refused (bypass: git commit --no-verify).
 set -euo pipefail
 if ! command -v pre-commit >/dev/null 2>&1; then
     echo "pre-commit: not installed; run: pipx install pre-commit" >&2
     exit 1
 fi
-exec pre-commit run --hook-stage pre-commit
+# Read a copy of the config taken from the default branch, not the checked-out file, so a
+# branch (a fork PR checked out locally) cannot redefine what runs on commit.
+d=$(git rev-parse --path-format=absolute --git-common-dir)
+if [ ! -f "$d/secret-guard.yaml" ]; then
+    echo "pre-commit: no reviewed config copy; run:" >&2
+    echo "  git show origin/HEAD:.pre-commit-config.yaml > $d/secret-guard.yaml" >&2
+    exit 1
+fi
+exec pre-commit run --config "$d/secret-guard.yaml" --hook-stage pre-commit
