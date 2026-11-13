@@ -7,13 +7,12 @@ if ! command -v pre-commit >/dev/null 2>&1; then
     echo "pre-commit: not installed; run: pipx install pre-commit" >&2
     exit 1
 fi
-# Read a copy of the config taken from the default branch, not the checked-out file, so a
-# branch (a fork PR checked out locally) cannot redefine what runs on commit.
-# The copies (and the pinned gitleaks policy) come from: git show origin/HEAD:.secret-guard/activate.sh | sh
-d=$(git rev-parse --path-format=absolute --git-common-dir)
-if [ ! -f "$d/secret-guard.yaml" ] || [ ! -f "$d/secret-guard-gitleaks.toml" ]; then
+# The guard runner and its reviewed copies are written by .secret-guard/activate.sh, which
+# also checks that this hook ends with the line below. Activate with:
+#   s=$(git show origin/HEAD:.secret-guard/activate.sh) && sh -c "$s" activate
+if [ ! -x "$(git rev-parse --path-format=absolute --git-common-dir)/secret-guard-run" ]; then
     echo "pre-commit: secret guard not activated; run:" >&2
-    echo "  git show origin/HEAD:.secret-guard/activate.sh | sh" >&2
+    echo '  s=$(git show origin/HEAD:.secret-guard/activate.sh) && sh -c "$s" activate' >&2
     exit 1
 fi
-GITLEAKS_CONFIG="$d/secret-guard-gitleaks.toml" exec pre-commit run --config "$d/secret-guard.yaml" --hook-stage pre-commit
+exec "$(git rev-parse --path-format=absolute --git-common-dir)/secret-guard-run" "$@"
