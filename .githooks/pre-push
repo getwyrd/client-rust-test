@@ -3,8 +3,8 @@
 # static checks leave the machine. Runs the same `make check` that a reviewer
 # expects to be green (fmt, clippy -D warnings, cargo check).
 #
-# This hook is version-controlled under .githooks/. Enable it with:
-#     git config core.hooksPath .githooks
+# This hook is version-controlled under .githooks/. Install the reviewed copy from main:
+#     git show refs/remotes/origin/HEAD:.githooks/pre-push > .git/hooks/pre-push && chmod +x .git/hooks/pre-push
 #
 # Bypass for a work-in-progress push with:  git push --no-verify
 set -euo pipefail
